@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="#1A237E"/>
+  <!-- Lightbulb body -->
+  <ellipse cx="128" cy="110" rx="42" ry="48" fill="#FFF176"/>
+  <!-- Lightbulb base lines -->
+  <rect x="108" y="152" width="40" height="10" rx="4" fill="#FFF176"/>
+  <rect x="112" y="165" width="32" height="10" rx="4" fill="#FFF176"/>
+  <rect x="116" y="178" width="24" height="10" rx="5" fill="#FFF176"/>
+  <!-- Shine -->
+  <ellipse cx="112" cy="95" rx="10" ry="16" fill="white" opacity="0.3" transform="rotate(-20 112 95)"/>
+  <!-- App name -->
+  <text x="128" y="222" font-family="Arial,sans-serif" font-size="22" font-weight="bold"
+        fill="white" text-anchor="middle" letter-spacing="1">IdeaTracker</text>
+</svg>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=IdeaTracker
+GenericName=Gestor de Ideas
+Comment=Registra, gestiona y prioriza tus ideas y planes de negocio
+Exec=IdeaTracker
+Icon=IdeaTracker
+Terminal=false
+Type=Application
+Categories=Office;ProjectManagement;
+Keywords=ideas;planes;negocio;tracker;notas;
+StartupNotify=true
+StartupWMClass=IdeaTracker
