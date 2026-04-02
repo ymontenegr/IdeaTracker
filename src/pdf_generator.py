@@ -421,7 +421,32 @@ def generate_task_report(tarea: Tarea) -> bytes:
     else:
         story.append(Paragraph("Sin historial de estatus.", styles["value"]))
 
-    story.append(Spacer(1, 1 * cm))
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Notes section
+    story.append(Paragraph(f"Notas / Observaciones  ({len(tarea.notas)})", styles["section"]))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GREY))
+    story.append(Spacer(1, 0.2 * cm))
+
+    if tarea.notas:
+        for nota in tarea.notas:
+            note_block = [[
+                Paragraph(nota.fecha_display(), styles["note_date"]),
+                Paragraph(nota.texto, styles["note_text"]),
+            ]]
+            note_t = Table(note_block, colWidths=[3 * cm, 13.5 * cm])
+            note_t.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.3, BORDER_GREY),
+            ]))
+            story.append(note_t)
+    else:
+        story.append(Paragraph("Sin notas registradas.", styles["value"]))
+
+    story.append(Spacer(1, 0.8 * cm))
     story.append(HRFlowable(width="100%", thickness=0.3, color=BORDER_GREY))
     story.append(Spacer(1, 0.2 * cm))
     story.append(Paragraph(

@@ -236,6 +236,19 @@ def create_tarea(
     return tarea
 
 
+def add_nota_tarea(tarea_id: str, texto: str) -> Optional[Tarea]:
+    tarea = load_tarea(tarea_id)
+    if tarea is None:
+        return None
+    nota = Nota(
+        fecha=datetime.now().isoformat(timespec="seconds"),
+        texto=texto.strip(),
+    )
+    tarea.notas.append(nota)
+    save_tarea(tarea)
+    return tarea
+
+
 def cambiar_estatus_tarea(tarea_id: str, nuevo_estatus: str) -> Optional[Tarea]:
     tarea = load_tarea(tarea_id)
     if tarea is None:

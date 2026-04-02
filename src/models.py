@@ -147,6 +147,7 @@ class Tarea:
     fecha_creacion: str     # ISO datetime (automático)
     estatus: str            # Por iniciar | Iniciada | Finalizada | Cerrada
     historial_estatus: List[HistorialEstatus] = field(default_factory=list)
+    notas: List["Nota"] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -158,12 +159,14 @@ class Tarea:
             "fecha_creacion": self.fecha_creacion,
             "estatus": self.estatus,
             "historial_estatus": [h.to_dict() for h in self.historial_estatus],
+            "notas": [n.to_dict() for n in self.notas],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Tarea":
         historial = [HistorialEstatus.from_dict(h)
                      for h in data.get("historial_estatus", [])]
+        notas = [Nota.from_dict(n) for n in data.get("notas", [])]
         return cls(
             id=data["id"],
             nombre=data["nombre"],
@@ -173,6 +176,7 @@ class Tarea:
             fecha_creacion=data["fecha_creacion"],
             estatus=data.get("estatus", "Por iniciar"),
             historial_estatus=historial,
+            notas=notas,
         )
 
     def fecha_creacion_display(self) -> str:

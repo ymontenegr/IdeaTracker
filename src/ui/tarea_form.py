@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt
 
 from ..data_manager import (
     load_all_ideas, create_tarea, save_tarea,
-    cambiar_estatus_tarea, load_tarea
+    cambiar_estatus_tarea, load_tarea, add_nota_tarea
 )
 from ..models import Tarea
 from ..config import (
@@ -189,6 +189,44 @@ class TareaFormDialog(QDialog):
             )
             bl.addWidget(self.historial_list)
 
+            # ── Notes ─────────────────────────────────────────
+            bl.addWidget(_sep())
+            bl.addWidget(_section("Notas / Observaciones"))
+
+            self.notes_list = QListWidget()
+            self.notes_list.setStyleSheet("""
+                QListWidget {
+                    border: 1px solid #E0E0E0; border-radius: 6px;
+                    background: #FFFFFF; font-size: 12px; color: #222222;
+                }
+                QListWidget::item {
+                    padding: 8px 10px; border-bottom: 1px solid #F0F0F0; color: #222222;
+                }
+            """)
+            self.notes_list.setMinimumHeight(110)
+            self.notes_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            bl.addWidget(self.notes_list)
+
+            note_row = QHBoxLayout()
+            self.note_input = QLineEdit()
+            self.note_input.setPlaceholderText("Escribe una nueva nota u observación...")
+            note_row.addWidget(self.note_input)
+
+            btn_add_note = QPushButton("+ Agregar nota")
+            btn_add_note.setStyleSheet("""
+                QPushButton {
+                    background: #E8F5E9; color: #2E7D32;
+                    border: 1px solid #A5D6A7; border-radius: 6px;
+                    padding: 7px 14px; font-size: 13px; font-weight: bold;
+                }
+                QPushButton:hover { background: #C8E6C9; }
+            """)
+            btn_add_note.clicked.connect(self._add_note)
+            note_row.addWidget(btn_add_note)
+            bl.addLayout(note_row)
+
+            self._populate_notes()
+
         bl.addStretch()
         scroll.setWidget(body)
         root.addWidget(scroll)
@@ -229,6 +267,7 @@ class TareaFormDialog(QDialog):
             self.estatus_combo.setCurrentIndex(idx)
         self._update_estatus_style()
         self._populate_historial()
+        self._populate_notes()
 
     def _preset_idea(self):
         for i in range(self.idea_combo.count()):
@@ -240,9 +279,31 @@ class TareaFormDialog(QDialog):
         self.historial_list.clear()
         if self._tarea:
             for h in reversed(self._tarea.historial_estatus):
-                color = TAREA_STATUS_COLORS.get(h.estatus, "#888888")
                 item = QListWidgetItem(f"[{h.fecha_display()}]  →  {h.estatus}")
                 self.historial_list.addItem(item)
+
+    def _populate_notes(self):
+        self.notes_list.clear()
+        if self._tarea:
+            if not self._tarea.notas:
+                self.notes_list.addItem(QListWidgetItem("(Sin notas registradas)"))
+            for nota in reversed(self._tarea.notas):
+                self.notes_list.addItem(
+                    QListWidgetItem(f"[{nota.fecha_display()}]  {nota.texto}")
+                )
+
+    def _add_note(self):
+        if not self._tarea:
+            return
+        texto = self.note_input.text().strip()
+        if not texto:
+            QMessageBox.warning(self, "Nota vacía", "Escribe el texto de la nota antes de agregar.")
+            return
+        updated = add_nota_tarea(self._tarea.id, texto)
+        if updated:
+            self._tarea = updated
+            self._populate_notes()
+            self.note_input.clear()
 
     def _update_estatus_style(self):
         if not hasattr(self, 'estatus_combo'):
