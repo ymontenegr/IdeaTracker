@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QPushButton, QStackedWidget, QLabel, QFrame, QMessageBox
+    QPushButton, QStackedWidget, QLabel, QFrame, QMessageBox, QDialog
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QFont
@@ -148,10 +148,57 @@ class MainWindow(QMainWindow):
             self.reports_widget.refresh()
 
     def _exit_app(self):
-        reply = QMessageBox.question(
-            self, "Salir",
-            "¿Estás seguro de que deseas cerrar IdeaTracker?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Cerrar IdeaTracker")
+        dlg.setFixedSize(380, 160)
+        dlg.setStyleSheet("""
+            QDialog {
+                background: #FFFFFF;
+                border: 1px solid #CCCCCC;
+                border-radius: 10px;
+            }
+        """)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(32, 28, 32, 24)
+        layout.setSpacing(24)
+
+        msg = QLabel("¿Estás seguro de que deseas\ncerrar IdeaTracker?")
+        msg.setStyleSheet("font-size: 15px; color: #222222;")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(14)
+
+        btn_no = QPushButton("Cancelar")
+        btn_no.setFixedHeight(38)
+        btn_no.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF; color: #333333;
+                border: 1px solid #CCCCCC; border-radius: 6px;
+                font-size: 13px; padding: 0 20px;
+            }
+            QPushButton:hover { background: #F5F5F5; }
+        """)
+        btn_no.clicked.connect(dlg.reject)
+
+        btn_yes = QPushButton("Sí, cerrar")
+        btn_yes.setFixedHeight(38)
+        btn_yes.setStyleSheet("""
+            QPushButton {
+                background: #E53935; color: #FFFFFF;
+                border: none; border-radius: 6px;
+                font-size: 13px; font-weight: bold; padding: 0 20px;
+            }
+            QPushButton:hover { background: #C62828; }
+        """)
+        btn_yes.clicked.connect(dlg.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_no)
+        btn_row.addWidget(btn_yes)
+        layout.addLayout(btn_row)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             self.close()
