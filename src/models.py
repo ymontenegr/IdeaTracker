@@ -116,3 +116,75 @@ class Categoria:
     @classmethod
     def from_dict(cls, data: dict) -> "Categoria":
         return cls(id=data["id"], nombre=data["nombre"])
+
+
+@dataclass
+class HistorialEstatus:
+    estatus: str
+    fecha: str   # ISO datetime
+
+    def to_dict(self) -> dict:
+        return {"estatus": self.estatus, "fecha": self.fecha}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "HistorialEstatus":
+        return cls(estatus=data["estatus"], fecha=data["fecha"])
+
+    def fecha_display(self) -> str:
+        try:
+            return datetime.fromisoformat(self.fecha).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return self.fecha
+
+
+@dataclass
+class Tarea:
+    id: str
+    nombre: str
+    descripcion: str
+    idea_id: str            # "default" si no pertenece a ninguna idea
+    idea_nombre: str        # Nombre de la idea o "Sin proyecto"
+    fecha_creacion: str     # ISO datetime (automático)
+    estatus: str            # Por iniciar | Iniciada | Finalizada | Cerrada
+    historial_estatus: List[HistorialEstatus] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "nombre": self.nombre,
+            "descripcion": self.descripcion,
+            "idea_id": self.idea_id,
+            "idea_nombre": self.idea_nombre,
+            "fecha_creacion": self.fecha_creacion,
+            "estatus": self.estatus,
+            "historial_estatus": [h.to_dict() for h in self.historial_estatus],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Tarea":
+        historial = [HistorialEstatus.from_dict(h)
+                     for h in data.get("historial_estatus", [])]
+        return cls(
+            id=data["id"],
+            nombre=data["nombre"],
+            descripcion=data.get("descripcion", ""),
+            idea_id=data.get("idea_id", "default"),
+            idea_nombre=data.get("idea_nombre", "Sin proyecto"),
+            fecha_creacion=data["fecha_creacion"],
+            estatus=data.get("estatus", "Por iniciar"),
+            historial_estatus=historial,
+        )
+
+    def fecha_creacion_display(self) -> str:
+        try:
+            return datetime.fromisoformat(self.fecha_creacion).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return self.fecha_creacion
+
+    def fecha_ultimo_cambio_display(self) -> str:
+        if self.historial_estatus:
+            return self.historial_estatus[-1].fecha_display()
+        return self.fecha_creacion_display()
+
+    def es_independiente(self) -> bool:
+        return self.idea_id == "default"

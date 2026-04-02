@@ -274,6 +274,37 @@ class IdeaFormDialog(QDialog):
 
             self._populate_notes()
 
+            # ── Tasks (edit mode only) ──────────────────────
+            form_layout.addWidget(_separator())
+            form_layout.addWidget(_section_title("Tareas"))
+
+            self.tareas_list = QListWidget()
+            self.tareas_list.setStyleSheet("""
+                QListWidget {
+                    border: 1px solid #E0E0E0; border-radius: 6px;
+                    background: #FFFFFF; font-size: 12px; color: #222222;
+                }
+                QListWidget::item {
+                    padding: 8px 10px; border-bottom: 1px solid #F0F0F0; color: #222222;
+                }
+            """)
+            self.tareas_list.setMinimumHeight(110)
+            self.tareas_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            form_layout.addWidget(self.tareas_list)
+
+            tarea_row = QHBoxLayout()
+            self.tarea_nombre_input = QLineEdit()
+            self.tarea_nombre_input.setPlaceholderText("Nombre de la nueva tarea...")
+            tarea_row.addWidget(self.tarea_nombre_input)
+
+            btn_add_tarea = QPushButton("+ Agregar tarea")
+            btn_add_tarea.setStyleSheet(BTN_ADD_NOTE)
+            btn_add_tarea.clicked.connect(self._add_tarea)
+            tarea_row.addWidget(btn_add_tarea)
+            form_layout.addLayout(tarea_row)
+
+            self._populate_tareas()
+
         form_layout.addStretch()
         scroll.setWidget(body)
         root.addWidget(scroll)
@@ -352,6 +383,36 @@ class IdeaFormDialog(QDialog):
             for nota in reversed(self._idea.notas):
                 item = QListWidgetItem(f"[{nota.fecha_display()}]  {nota.texto}")
                 self.notes_list.addItem(item)
+
+    def _populate_tareas(self):
+        from ..data_manager import load_tareas_by_idea
+        from ..config import TAREA_STATUS_COLORS
+        self.tareas_list.clear()
+        if self._idea:
+            tareas = load_tareas_by_idea(self._idea.id)
+            if not tareas:
+                self.tareas_list.addItem(QListWidgetItem("(Sin tareas registradas)"))
+            for t in sorted(tareas, key=lambda x: x.fecha_creacion, reverse=True):
+                color = TAREA_STATUS_COLORS.get(t.estatus, "#888888")
+                item = QListWidgetItem(f"[{t.estatus}]  {t.nombre}")
+                self.tareas_list.addItem(item)
+
+    def _add_tarea(self):
+        from ..data_manager import create_tarea
+        if not self._idea:
+            return
+        nombre = self.tarea_nombre_input.text().strip()
+        if not nombre:
+            QMessageBox.warning(self, "Campo vacío", "Escribe el nombre de la tarea.")
+            return
+        create_tarea(
+            nombre=nombre,
+            descripcion="",
+            idea_id=self._idea.id,
+            idea_nombre=self._idea.nombre,
+        )
+        self.tarea_nombre_input.clear()
+        self._populate_tareas()
 
     def _update_estatus_style(self):
         if not hasattr(self, 'estatus_combo'):

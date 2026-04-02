@@ -1,8 +1,8 @@
 """
 PDF generation using ReportLab.
-Provides two reports:
   - generate_detail_report(idea) -> bytes
   - generate_monthly_report(ideas, month, year) -> bytes
+  - generate_task_report(tarea) -> bytes
 """
 
 from io import BytesIO
@@ -20,8 +20,8 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.flowables import Flowable
 
-from .models import Idea
-from .config import STATUS_COLORS, PRIORIDAD_COLORS
+from .models import Idea, Tarea
+from .config import STATUS_COLORS, PRIORIDAD_COLORS, TAREA_STATUS_COLORS
 
 
 # ── Color helpers ─────────────────────────────────────────────────────────
@@ -280,7 +280,52 @@ def generate_detail_report(idea: Idea) -> bytes:
     else:
         story.append(Paragraph("Sin notas registradas.", styles["value"]))
 
-    story.append(Spacer(1, 1 * cm))
+    story.append(Spacer(1, 0.4 * cm))
+
+    # ── Tasks section ─────────────────────────────────────
+    from .data_manager import load_tareas_by_idea
+    tareas = load_tareas_by_idea(idea.id)
+
+    story.append(Paragraph(f"Tareas Asociadas  ({len(tareas)})", styles["section"]))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GREY))
+    story.append(Spacer(1, 0.2 * cm))
+
+    if tareas:
+        tareas_headers = [
+            Paragraph("Tarea", styles["table_header"]),
+            Paragraph("Estatus", styles["table_header"]),
+            Paragraph("Creación", styles["table_header"]),
+            Paragraph("Último Cambio", styles["table_header"]),
+        ]
+        tareas_data = [tareas_headers]
+        for t in sorted(tareas, key=lambda x: x.fecha_creacion):
+            tc = TAREA_STATUS_COLORS.get(t.estatus, "#888888")
+            tareas_data.append([
+                Paragraph(t.nombre, styles["table_cell"]),
+                Paragraph(
+                    f'<font color="{tc}"><b>●</b></font>  {t.estatus}',
+                    styles["table_cell"]
+                ),
+                Paragraph(t.fecha_creacion_display(), styles["table_cell_center"]),
+                Paragraph(t.fecha_ultimo_cambio_display(), styles["table_cell_center"]),
+            ])
+        t_tbl = Table(tareas_data, colWidths=[7 * cm, 3.5 * cm, 3 * cm, 3 * cm])
+        t_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_BLUE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER_GREY),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            *[("BACKGROUND", (0, i), (-1, i), LIGHT_GREY)
+              for i in range(2, len(tareas_data), 2)],
+        ]))
+        story.append(t_tbl)
+    else:
+        story.append(Paragraph("Sin tareas registradas.", styles["value"]))
+
+    story.append(Spacer(1, 0.8 * cm))
 
     # Footer
     story.append(HRFlowable(width="100%", thickness=0.3, color=BORDER_GREY))
@@ -293,6 +338,100 @@ def generate_detail_report(idea: Idea) -> bytes:
     doc.build(story)
     return buffer.getvalue()
 
+
+# ── Report 3: Task Detail ─────────────────────────────────────────────────
+
+def generate_task_report(tarea: Tarea) -> bytes:
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=1.5 * cm, bottomMargin=2 * cm,
+        title=f"Tarea — {tarea.nombre}",
+    )
+    styles = _make_styles()
+    story = []
+
+    story.append(_header_table(
+        tarea.nombre,
+        f"Reporte de Tarea  ·  Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ))
+    story.append(Spacer(1, 0.4 * cm))
+
+    status_color = TAREA_STATUS_COLORS.get(tarea.estatus, "#888888")
+    badge_data = [[
+        Paragraph(
+            f'<font color="{status_color}"><b>●</b></font>  '
+            f'<font color="#333333" size="11"><b>{tarea.estatus}</b></font>',
+            styles["value"]
+        ),
+        Paragraph(f'Proyecto: <b>{tarea.idea_nombre}</b>', styles["value"]),
+        Paragraph(f'Creada: <b>{tarea.fecha_creacion_display()}</b>', styles["value"]),
+    ]]
+    badge_t = Table(badge_data, colWidths=[5.5 * cm, 7 * cm, 4 * cm])
+    badge_t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), LIGHT_GREY),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER_GREY),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEAFTER", (0, 0), (1, 0), 0.5, BORDER_GREY),
+    ]))
+    story.append(badge_t)
+    story.append(Spacer(1, 0.5 * cm))
+
+    story.append(Paragraph("Descripción", styles["section"]))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GREY))
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(Paragraph(tarea.descripcion or "Sin descripción.", styles["value"]))
+    story.append(Spacer(1, 0.5 * cm))
+
+    story.append(Paragraph(
+        f"Historial de Estatus  ({len(tarea.historial_estatus)})", styles["section"]
+    ))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GREY))
+    story.append(Spacer(1, 0.2 * cm))
+
+    if tarea.historial_estatus:
+        hist_data = [[
+            Paragraph("Fecha / Hora", styles["table_header"]),
+            Paragraph("Estatus", styles["table_header"]),
+        ]]
+        for h in tarea.historial_estatus:
+            hc = TAREA_STATUS_COLORS.get(h.estatus, "#888888")
+            hist_data.append([
+                Paragraph(h.fecha_display(), styles["table_cell_center"]),
+                Paragraph(f'<font color="{hc}"><b>●</b></font>  {h.estatus}', styles["table_cell"]),
+            ])
+        h_tbl = Table(hist_data, colWidths=[5 * cm, 11.5 * cm])
+        h_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_BLUE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER_GREY),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            *[("BACKGROUND", (0, i), (-1, i), LIGHT_GREY) for i in range(2, len(hist_data), 2)],
+        ]))
+        story.append(h_tbl)
+    else:
+        story.append(Paragraph("Sin historial de estatus.", styles["value"]))
+
+    story.append(Spacer(1, 1 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.3, color=BORDER_GREY))
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(Paragraph(
+        f"IdeaTracker  ·  Reporte de tarea generado el "
+        f"{datetime.now().strftime('%d/%m/%Y a las %H:%M')}",
+        styles["footer"]
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
 
 # ── Report 2: Monthly ─────────────────────────────────────────────────────
 

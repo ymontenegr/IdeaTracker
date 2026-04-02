@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from ..data_manager import load_all_ideas, load_idea
+from ..data_manager import load_all_ideas, load_idea, load_all_tareas, load_tarea
 from ..models import Idea
 
 
@@ -148,6 +148,38 @@ class ReportsWidget(QWidget):
         g2l.addLayout(row2)
 
         cl.addWidget(grp2)
+
+        # ── Report 3: Task Detail ─────────────────────────────
+        grp3 = QGroupBox("✅  Reporte Detallado de Tarea")
+        grp3.setStyleSheet(GROUP_STYLE)
+        g3l = QVBoxLayout(grp3)
+        g3l.setSpacing(14)
+
+        desc3 = QLabel(
+            "Genera el reporte completo de una tarea: descripción, estatus actual "
+            "e historial completo de cambios de estatus."
+        )
+        desc3.setStyleSheet("color: #555555; font-size: 13px;")
+        desc3.setWordWrap(True)
+        g3l.addWidget(desc3)
+
+        row3 = QHBoxLayout()
+        lbl_tarea = QLabel("Tarea:")
+        lbl_tarea.setStyleSheet("font-size: 13px; color: #333333; font-weight: normal;")
+        row3.addWidget(lbl_tarea)
+
+        self.tarea_combo = QComboBox()
+        self.tarea_combo.setStyleSheet(COMBO_STYLE)
+        self.tarea_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        row3.addWidget(self.tarea_combo)
+
+        btn_task = QPushButton("Ver Reporte")
+        btn_task.setStyleSheet(BTN_PRIMARY)
+        btn_task.clicked.connect(self._preview_task)
+        row3.addWidget(btn_task)
+        g3l.addLayout(row3)
+
+        cl.addWidget(grp3)
         cl.addStretch()
         layout.addWidget(content)
 
@@ -157,6 +189,16 @@ class ReportsWidget(QWidget):
         self._ideas = load_all_ideas()
         self._populate_idea_combo()
         self._populate_month_combo()
+        self._populate_tarea_combo()
+
+    def _populate_tarea_combo(self):
+        self.tarea_combo.clear()
+        tareas = sorted(load_all_tareas(), key=lambda t: t.nombre.lower())
+        for t in tareas:
+            label = f"{t.nombre}  [{t.idea_nombre}]"
+            self.tarea_combo.addItem(label, t.id)
+        if not tareas:
+            self.tarea_combo.addItem("(No hay tareas registradas)", None)
 
     def _populate_idea_combo(self):
         self.idea_combo.clear()
@@ -224,6 +266,32 @@ class ReportsWidget(QWidget):
         dlg = PDFPreviewDialog(
             pdf_bytes=pdf_bytes,
             suggested_name=f"reporte_mensual_{month_str}",
+            parent=self,
+        )
+        dlg.exec()
+
+    def _preview_task(self):
+        tarea_id = self.tarea_combo.currentData()
+        if not tarea_id:
+            QMessageBox.information(self, "Sin tareas", "No hay tareas registradas.")
+            return
+        tarea = load_tarea(tarea_id)
+        if tarea is None:
+            QMessageBox.warning(self, "Error", "No se encontró la tarea.")
+            return
+
+        from ..pdf_generator import generate_task_report
+        from .pdf_preview import PDFPreviewDialog
+
+        try:
+            pdf_bytes = generate_task_report(tarea)
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando PDF", str(e))
+            return
+
+        dlg = PDFPreviewDialog(
+            pdf_bytes=pdf_bytes,
+            suggested_name=f"reporte_tarea_{tarea.nombre[:30].replace(' ', '_')}",
             parent=self,
         )
         dlg.exec()

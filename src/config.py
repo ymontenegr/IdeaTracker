@@ -5,8 +5,26 @@ from pathlib import Path
 
 APP_DIR = Path.home() / "IdeaTracker"
 DATA_DIR = APP_DIR / "data"
+TAREAS_DIR = APP_DIR / "tareas"
 EXPORTS_DIR = APP_DIR / "exports"
 CONFIG_FILE = APP_DIR / "config.json"
+
+TAREA_STATUS_LIST = [
+    "Por iniciar",
+    "Iniciada",
+    "Finalizada",
+    "Cerrada",
+]
+
+TAREA_STATUS_COLORS = {
+    "Por iniciar": "#2196F3",   # Blue
+    "Iniciada":    "#FFC107",   # Yellow
+    "Finalizada":  "#4CAF50",   # Green
+    "Cerrada":     "#9E9E9E",   # Grey
+}
+
+IDEA_DEFAULT_ID   = "default"
+IDEA_DEFAULT_NAME = "Sin proyecto"
 
 MAX_CATEGORIES = 10
 
@@ -72,6 +90,7 @@ DEFAULT_CATEGORIES = [
 def setup_directories():
     """Create app directories and config.json if they don't exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TAREAS_DIR.mkdir(parents=True, exist_ok=True)
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     if not CONFIG_FILE.exists():

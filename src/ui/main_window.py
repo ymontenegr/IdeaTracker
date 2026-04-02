@@ -2,10 +2,11 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QMessageBox
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QFont
 
 from .ideas_widget import IdeasWidget
+from .tareas_widget import TareasWidget
 from .reports_widget import ReportsWidget
 from .config_widget import ConfigWidget
 
@@ -50,7 +51,7 @@ QWidget#content {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("IdeaTracker v1.0")
+        self.setWindowTitle("IdeaTracker v1.1")
         self.setMinimumSize(1100, 700)
         self.resize(1280, 780)
         self.setStyleSheet(MAIN_STYLE)
@@ -73,19 +74,20 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(12, 24, 12, 24)
         sidebar_layout.setSpacing(4)
 
-        # Logo / title
-        logo_label = QLabel("IdeaTracker  v1.0")
-        logo_label.setStyleSheet("color: #FFFFFF; font-size: 20px; font-weight: bold; padding: 8px 8px 24px 8px;")
+        logo_label = QLabel("IdeaTracker  v1.1")
+        logo_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 20px; font-weight: bold; padding: 8px 8px 24px 8px;"
+        )
         logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         sidebar_layout.addWidget(logo_label)
 
-        # Navigation buttons
-        self.btn_ideas = QPushButton("📝  Ideas")
+        self.btn_ideas   = QPushButton("📝  Ideas")
+        self.btn_tareas  = QPushButton("✅  Tareas")
         self.btn_reports = QPushButton("📊  Reportes")
-        self.btn_config = QPushButton("⚙️   Configuración")
-        self.btn_exit = QPushButton("🚪  Salir")
+        self.btn_config  = QPushButton("⚙️   Configuración")
+        self.btn_exit    = QPushButton("🚪  Salir")
 
-        for btn in (self.btn_ideas, self.btn_reports, self.btn_config):
+        for btn in (self.btn_ideas, self.btn_tareas, self.btn_reports, self.btn_config):
             btn.setCheckable(True)
             btn.setStyleSheet(NAV_STYLE)
             btn.setFont(QFont("Segoe UI", 13))
@@ -107,24 +109,26 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(0)
 
         self.stack = QStackedWidget()
-        self.ideas_widget = IdeasWidget()
+        self.ideas_widget   = IdeasWidget()
+        self.tareas_widget  = TareasWidget()
         self.reports_widget = ReportsWidget()
-        self.config_widget = ConfigWidget()
+        self.config_widget  = ConfigWidget()
 
         self.stack.addWidget(self.ideas_widget)    # index 0
-        self.stack.addWidget(self.reports_widget)  # index 1
-        self.stack.addWidget(self.config_widget)   # index 2
+        self.stack.addWidget(self.tareas_widget)   # index 1
+        self.stack.addWidget(self.reports_widget)  # index 2
+        self.stack.addWidget(self.config_widget)   # index 3
 
         content_layout.addWidget(self.stack)
         root_layout.addWidget(content)
 
-        # ── Connect signals ────────────────────────────────
-        self.btn_ideas.clicked.connect(lambda: self._navigate(0))
-        self.btn_reports.clicked.connect(lambda: self._navigate(1))
-        self.btn_config.clicked.connect(lambda: self._navigate(2))
+        # ── Signals ────────────────────────────────────────
+        self.btn_ideas.clicked.connect(lambda:   self._navigate(0))
+        self.btn_tareas.clicked.connect(lambda:  self._navigate(1))
+        self.btn_reports.clicked.connect(lambda: self._navigate(2))
+        self.btn_config.clicked.connect(lambda:  self._navigate(3))
         self.btn_exit.clicked.connect(self._exit_app)
 
-        # Sync config → ideas category list
         self.config_widget.categories_changed.connect(self.ideas_widget.refresh_categories)
         self.config_widget.categories_changed.connect(self.reports_widget.refresh)
 
@@ -132,14 +136,15 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, index: int):
         self.stack.setCurrentIndex(index)
-        buttons = [self.btn_ideas, self.btn_reports, self.btn_config]
+        buttons = [self.btn_ideas, self.btn_tareas, self.btn_reports, self.btn_config]
         for i, btn in enumerate(buttons):
             btn.setChecked(i == index)
 
-        # Refresh data when switching pages
         if index == 0:
             self.ideas_widget.refresh()
         elif index == 1:
+            self.tareas_widget.refresh()
+        elif index == 2:
             self.reports_widget.refresh()
 
     def _exit_app(self):

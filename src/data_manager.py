@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from .config import DATA_DIR, CONFIG_FILE, MAX_CATEGORIES
-from .models import Idea, Nota, Categoria
+from .config import DATA_DIR, TAREAS_DIR, CONFIG_FILE, MAX_CATEGORIES, IDEA_DEFAULT_ID, IDEA_DEFAULT_NAME
+from .models import Idea, Nota, Categoria, Tarea, HistorialEstatus
 
 
 # ── Config / Categories ─────────────────────────────────────────────────────
@@ -173,3 +173,79 @@ def add_nota(idea_id: str, texto: str) -> Optional[Idea]:
     idea.notas.append(nota)
     save_idea(idea)
     return idea
+
+
+# ── Tareas ───────────────────────────────────────────────────────────────────
+
+def _tarea_path(tarea_id: str) -> Path:
+    return TAREAS_DIR / f"{tarea_id}.json"
+
+
+def load_tarea(tarea_id: str) -> Optional[Tarea]:
+    path = _tarea_path(tarea_id)
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return Tarea.from_dict(json.load(f))
+
+
+def save_tarea(tarea: Tarea) -> None:
+    with open(_tarea_path(tarea.id), "w", encoding="utf-8") as f:
+        json.dump(tarea.to_dict(), f, ensure_ascii=False, indent=2)
+
+
+def delete_tarea(tarea_id: str) -> None:
+    path = _tarea_path(tarea_id)
+    if path.exists():
+        path.unlink()
+
+
+def load_all_tareas() -> List[Tarea]:
+    tareas = []
+    for f in TAREAS_DIR.glob("*.json"):
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                tareas.append(Tarea.from_dict(json.load(fp)))
+        except Exception:
+            pass
+    return tareas
+
+
+def load_tareas_by_idea(idea_id: str) -> List[Tarea]:
+    return [t for t in load_all_tareas() if t.idea_id == idea_id]
+
+
+def create_tarea(
+    nombre: str,
+    descripcion: str,
+    idea_id: str = IDEA_DEFAULT_ID,
+    idea_nombre: str = IDEA_DEFAULT_NAME,
+) -> Tarea:
+    now = datetime.now().isoformat(timespec="seconds")
+    tarea = Tarea(
+        id=str(uuid.uuid4()),
+        nombre=nombre,
+        descripcion=descripcion,
+        idea_id=idea_id,
+        idea_nombre=idea_nombre,
+        fecha_creacion=now,
+        estatus="Por iniciar",
+        historial_estatus=[HistorialEstatus(estatus="Por iniciar", fecha=now)],
+    )
+    save_tarea(tarea)
+    return tarea
+
+
+def cambiar_estatus_tarea(tarea_id: str, nuevo_estatus: str) -> Optional[Tarea]:
+    tarea = load_tarea(tarea_id)
+    if tarea is None:
+        return None
+    tarea.estatus = nuevo_estatus
+    tarea.historial_estatus.append(
+        HistorialEstatus(
+            estatus=nuevo_estatus,
+            fecha=datetime.now().isoformat(timespec="seconds"),
+        )
+    )
+    save_tarea(tarea)
+    return tarea
