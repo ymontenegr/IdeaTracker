@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QWidget, QFrame, QMessageBox, QSizePolicy
+    QScrollArea, QWidget, QFrame, QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QImage
@@ -165,8 +165,22 @@ class PDFPreviewDialog(QDialog):
 
     def _download_pdf(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{self._suggested_name}_{timestamp}.pdf"
-        dest = EXPORTS_DIR / filename
+        default_name = f"{self._suggested_name}_{timestamp}.pdf"
+        default_path = str(EXPORTS_DIR / default_name)
+
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar reporte PDF",
+            default_path,
+            "Archivos PDF (*.pdf)",
+        )
+
+        if not dest:
+            return  # Usuario canceló
+
+        if not dest.lower().endswith(".pdf"):
+            dest += ".pdf"
+
         try:
             with open(dest, "wb") as f:
                 f.write(self._pdf_bytes)
