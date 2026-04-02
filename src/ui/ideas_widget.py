@@ -237,8 +237,8 @@ class IdeasWidget(QWidget):
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(6, 224)
-        self.table.setRowHeight(0, 48)
-        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.setRowHeight(0, 58)
+        self.table.verticalHeader().setDefaultSectionSize(58)
 
         layout.addWidget(self.table)
 
@@ -387,7 +387,7 @@ class IdeasWidget(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(w)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(14)
 
         btn_edit = QPushButton("✏  Editar")

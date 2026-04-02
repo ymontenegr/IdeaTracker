@@ -165,7 +165,7 @@ class TareasWidget(QWidget):
         hh2.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         hh2.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 224)
-        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.verticalHeader().setDefaultSectionSize(58)
         layout.addWidget(self.table)
 
         # ── Status bar ───────────────────────────────────────
@@ -277,7 +277,7 @@ class TareasWidget(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         hl = QHBoxLayout(w)
-        hl.setContentsMargins(10, 5, 10, 5)
+        hl.setContentsMargins(10, 10, 10, 10)
         hl.setSpacing(14)
 
         btn_edit = QPushButton("✏  Editar")
