@@ -1,4 +1,4 @@
-# 💡 IdeaTracker v1.0
+# 💡 IdeaTracker v1.2.0
 
 Aplicación de escritorio para **registrar, gestionar, priorizar y hacer seguimiento de ideas y planes de negocio**. Funciona completamente offline, sin bases de datos externas ni conexión a internet.
 

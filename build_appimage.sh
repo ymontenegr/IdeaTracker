@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────
-#  IdeaTracker v1.0 — AppImage Builder
+#  IdeaTracker v1.2.0 — AppImage Builder
 #  Genera: IdeaTracker-1.0-x86_64.AppImage
 # ─────────────────────────────────────────────────────────────────
 set -e
@@ -12,7 +12,7 @@ OUTPUT="${APP_NAME}-${APP_VERSION}-${ARCH}.AppImage"
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║   IdeaTracker — AppImage Builder  v1.0  ║"
+echo "║  IdeaTracker — AppImage Builder  v1.2.0  ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 

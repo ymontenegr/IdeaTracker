@@ -51,7 +51,7 @@ QWidget#content {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("IdeaTracker v1.1")
+        self.setWindowTitle("IdeaTracker v1.2.0")
         self.setMinimumSize(1100, 700)
         self.resize(1280, 780)
         self.setStyleSheet(MAIN_STYLE)
@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(12, 24, 12, 24)
         sidebar_layout.setSpacing(4)
 
-        logo_label = QLabel("IdeaTracker  v1.1")
+        logo_label = QLabel("IdeaTracker  v1.2.0")
         logo_label.setStyleSheet(
             "color: #FFFFFF; font-size: 20px; font-weight: bold; padding: 8px 8px 24px 8px;"
         )
