@@ -22,7 +22,9 @@ def main():
     setup_directories()
 
     app = QApplication(sys.argv)
-    app.setApplicationName("IdeaTracker v1.0")
+    app.setApplicationName("ideaTracker")        # debe coincidir con StartupWMClass
+    app.setApplicationDisplayName("IdeaTracker v1.0")
+    app.setDesktopFileName("ideaTracker")        # Wayland app_id
     app.setOrganizationName("IdeaTracker")
     app.setStyle("Fusion")
 

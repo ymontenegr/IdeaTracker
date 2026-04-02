@@ -2,11 +2,11 @@
 Name=IdeaTracker
 GenericName=Gestor de Ideas
 Comment=Registra, gestiona y prioriza tus ideas y planes de negocio
-Exec=IdeaTracker
-Icon=IdeaTracker
+Exec=python3 /home/fox/Documentos/Desarrollo/Prg linux/IdeaTracker/main.py
+Icon=ideaTracker
 Terminal=false
 Type=Application
 Categories=Office;ProjectManagement;
 Keywords=ideas;planes;negocio;tracker;notas;
 StartupNotify=true
-StartupWMClass=IdeaTracker
+StartupWMClass=ideaTracker
