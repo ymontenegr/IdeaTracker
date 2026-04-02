@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 
 from src.config import setup_directories
 from src.ui.main_window import MainWindow
@@ -73,7 +73,13 @@ def main():
         QDialog { background: #FFFFFF; }
     """)
 
+    # App icon — title bar + taskbar
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "IdeaTracker.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
     window = MainWindow()
+    window.setWindowIcon(QIcon(icon_path))
     window.show()
 
     sys.exit(app.exec())

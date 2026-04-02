@@ -236,7 +236,7 @@ class IdeasWidget(QWidget):
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 200)
+        self.table.setColumnWidth(6, 224)
         self.table.setRowHeight(0, 48)
         self.table.verticalHeader().setDefaultSectionSize(48)
 
@@ -387,8 +387,8 @@ class IdeasWidget(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(w)
-        layout.setContentsMargins(8, 5, 8, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(14)
 
         btn_edit = QPushButton("✏  Editar")
         btn_edit.setStyleSheet(BTN_SECONDARY)
@@ -398,7 +398,7 @@ class IdeasWidget(QWidget):
         btn_del = QPushButton("🗑  Borrar")
         btn_del.setStyleSheet(BTN_DANGER)
         btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_del.setFixedSize(88, 32)
+        btn_del.setFixedSize(96, 32)
 
         btn_edit.clicked.connect(lambda: self._open_edit_form(idea_id))
         btn_del.clicked.connect(lambda: self._confirm_delete(idea_id))
