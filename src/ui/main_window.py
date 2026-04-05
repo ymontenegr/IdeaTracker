@@ -1,204 +1,233 @@
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QPushButton, QStackedWidget, QLabel, QFrame, QMessageBox, QDialog
-)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QFont
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gio", "2.0")
 
-from .ideas_widget import IdeasWidget
-from .tareas_widget import TareasWidget
-from .reports_widget import ReportsWidget
-from .config_widget import ConfigWidget
+from gi.repository import Gtk, Adw, Gio
 
 
-NAV_STYLE = """
-QPushButton {
-    background: transparent;
-    color: #B0BEC5;
-    border: none;
-    border-radius: 8px;
-    padding: 14px 20px;
-    text-align: left;
-    font-size: 14px;
-}
-QPushButton:hover {
-    background: rgba(255,255,255,0.08);
-    color: #FFFFFF;
-}
-QPushButton:checked {
-    background: rgba(33, 150, 243, 0.25);
-    color: #FFFFFF;
-    border-left: 3px solid #2196F3;
-}
-"""
-
-SIDEBAR_STYLE = """
-QWidget#sidebar {
-    background: #1A237E;
-}
-"""
-
-MAIN_STYLE = """
-QMainWindow {
-    background: #F5F7FA;
-}
-QWidget#content {
-    background: #F5F7FA;
-}
-"""
-
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("IdeaTracker v1.2.0")
-        self.setMinimumSize(1100, 700)
-        self.resize(1280, 780)
-        self.setStyleSheet(MAIN_STYLE)
+class MainWindow(Adw.ApplicationWindow):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.set_title("IdeaTracker")
+        self.set_default_size(1100, 700)
+        self.set_size_request(800, 600)
+        self.set_icon_name("IdeaTracker")   # taskbar + title bar icon
         self._build_ui()
+        self._setup_actions()
 
     def _build_ui(self):
-        central = QWidget()
-        central.setObjectName("central")
-        root_layout = QHBoxLayout(central)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-        self.setCentralWidget(central)
+        # ToastOverlay wraps all content so toasts work app-wide
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
 
-        # ── Sidebar ────────────────────────────────────────
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(220)
-        sidebar.setStyleSheet(SIDEBAR_STYLE)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(12, 24, 12, 24)
-        sidebar_layout.setSpacing(4)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.toast_overlay.set_child(main_box)
 
-        logo_label = QLabel("IdeaTracker  v1.2.0")
-        logo_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 20px; font-weight: bold; padding: 8px 8px 24px 8px;"
+        # ── View stack (3 main views) ──────────────────────────────────────
+        self.view_stack = Adw.ViewStack()
+
+        from .ideas_widget import IdeasWidget
+        from .tareas_widget import TareasWidget
+        from .reports_widget import ReportsWidget
+
+        self.ideas_widget = IdeasWidget(toast_overlay=self.toast_overlay)
+        self.tareas_widget = TareasWidget(toast_overlay=self.toast_overlay)
+        self.reports_widget = ReportsWidget(toast_overlay=self.toast_overlay)
+
+        self.view_stack.add_titled_with_icon(
+            self.ideas_widget, "ideas", "Ideas", "document-edit-symbolic"
         )
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        sidebar_layout.addWidget(logo_label)
+        self.view_stack.add_titled_with_icon(
+            self.tareas_widget, "tareas", "Tareas", "emblem-ok-symbolic"
+        )
+        self.view_stack.add_titled_with_icon(
+            self.reports_widget, "reportes", "Reportes", "printer-symbolic"
+        )
 
-        self.btn_ideas   = QPushButton("📝  Ideas")
-        self.btn_tareas  = QPushButton("✅  Tareas")
-        self.btn_reports = QPushButton("📊  Reportes")
-        self.btn_config  = QPushButton("⚙️   Configuración")
-        self.btn_exit    = QPushButton("🚪  Salir")
+        # ── Header bar ────────────────────────────────────────────────────
+        header_bar = Adw.HeaderBar()
 
-        for btn in (self.btn_ideas, self.btn_tareas, self.btn_reports, self.btn_config):
-            btn.setCheckable(True)
-            btn.setStyleSheet(NAV_STYLE)
-            btn.setFont(QFont("Segoe UI", 13))
-            sidebar_layout.addWidget(btn)
+        view_switcher = Adw.ViewSwitcher()
+        view_switcher.set_stack(self.view_stack)
+        view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        header_bar.set_title_widget(view_switcher)
 
-        sidebar_layout.addStretch()
+        # Primary action button (context-sensitive)
+        self.btn_new = Gtk.Button(label="Nueva idea")
+        self.btn_new.add_css_class("suggested-action")
+        self.btn_new.set_tooltip_text("Nueva idea (Ctrl+N)")
+        self.btn_new.connect("clicked", self._on_new_clicked)
+        header_bar.pack_end(self.btn_new)
 
-        self.btn_exit.setStyleSheet(NAV_STYLE + "QPushButton { color: #EF9A9A; }")
-        self.btn_exit.setFont(QFont("Segoe UI", 13))
-        sidebar_layout.addWidget(self.btn_exit)
+        # Overflow menu (⋮)
+        menu_model = Gio.Menu()
+        menu_model.append("Configuración", "win.preferences")
+        sep = Gio.Menu()
+        sep.append("Atajos de teclado", "win.show-shortcuts")
+        sep.append("Acerca de IdeaTracker", "win.about")
+        menu_model.append_section(None, sep)
 
-        root_layout.addWidget(sidebar)
+        menu_btn = Gtk.MenuButton(
+            menu_model=menu_model,
+            icon_name="open-menu-symbolic",
+            tooltip_text="Menú principal",
+        )
+        header_bar.pack_end(menu_btn)
 
-        # ── Content area ───────────────────────────────────
-        content = QWidget()
-        content.setObjectName("content")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
+        main_box.append(header_bar)
+        main_box.append(self.view_stack)
 
-        self.stack = QStackedWidget()
-        self.ideas_widget   = IdeasWidget()
-        self.tareas_widget  = TareasWidget()
-        self.reports_widget = ReportsWidget()
-        self.config_widget  = ConfigWidget()
+        # Bottom ViewSwitcher bar (for narrow windows)
+        switcher_bar = Adw.ViewSwitcherBar()
+        switcher_bar.set_stack(self.view_stack)
+        switcher_bar.set_reveal(False)
+        main_box.append(switcher_bar)
 
-        self.stack.addWidget(self.ideas_widget)    # index 0
-        self.stack.addWidget(self.tareas_widget)   # index 1
-        self.stack.addWidget(self.reports_widget)  # index 2
-        self.stack.addWidget(self.config_widget)   # index 3
+        # Update header when view changes
+        self.view_stack.connect("notify::visible-child", self._on_view_changed)
+        self._on_view_changed(self.view_stack, None)
 
-        content_layout.addWidget(self.stack)
-        root_layout.addWidget(content)
+    # ── View change ────────────────────────────────────────────────────────
 
-        # ── Signals ────────────────────────────────────────
-        self.btn_ideas.clicked.connect(lambda:   self._navigate(0))
-        self.btn_tareas.clicked.connect(lambda:  self._navigate(1))
-        self.btn_reports.clicked.connect(lambda: self._navigate(2))
-        self.btn_config.clicked.connect(lambda:  self._navigate(3))
-        self.btn_exit.clicked.connect(self._exit_app)
-
-        self.config_widget.categories_changed.connect(self.ideas_widget.refresh_categories)
-        self.config_widget.categories_changed.connect(self.reports_widget.refresh)
-
-        self._navigate(0)
-
-    def _navigate(self, index: int):
-        self.stack.setCurrentIndex(index)
-        buttons = [self.btn_ideas, self.btn_tareas, self.btn_reports, self.btn_config]
-        for i, btn in enumerate(buttons):
-            btn.setChecked(i == index)
-
-        if index == 0:
+    def _on_view_changed(self, stack, _param):
+        child_name = stack.get_visible_child_name()
+        if child_name == "ideas":
+            self.btn_new.set_label("Nueva idea")
+            self.btn_new.set_tooltip_text("Nueva idea (Ctrl+N)")
+            self.btn_new.set_visible(True)
             self.ideas_widget.refresh()
-        elif index == 1:
+        elif child_name == "tareas":
+            self.btn_new.set_label("Nueva tarea")
+            self.btn_new.set_tooltip_text("Nueva tarea (Ctrl+N)")
+            self.btn_new.set_visible(True)
             self.tareas_widget.refresh()
-        elif index == 2:
+        elif child_name == "reportes":
+            self.btn_new.set_visible(False)
             self.reports_widget.refresh()
 
-    def _exit_app(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Cerrar IdeaTracker")
-        dlg.setFixedSize(380, 160)
-        dlg.setStyleSheet("""
-            QDialog {
-                background: #FFFFFF;
-                border: 1px solid #CCCCCC;
-                border-radius: 10px;
-            }
-        """)
+    def _on_new_clicked(self, _button):
+        child_name = self.view_stack.get_visible_child_name()
+        if child_name == "ideas":
+            self.ideas_widget.open_new_form()
+        elif child_name == "tareas":
+            self.tareas_widget.open_new_form()
 
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(32, 28, 32, 24)
-        layout.setSpacing(24)
+    # ── Actions & keyboard shortcuts ────────────────────────────────────────
 
-        msg = QLabel("¿Estás seguro de que deseas\ncerrar IdeaTracker?")
-        msg.setStyleSheet("font-size: 15px; color: #222222;")
-        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(msg)
+    def _setup_actions(self):
+        app = self.get_application()
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(14)
+        def add_win_action(name, callback, accels=None):
+            a = Gio.SimpleAction.new(name, None)
+            a.connect("activate", callback)
+            self.add_action(a)
+            if accels:
+                app.set_accels_for_action(f"win.{name}", accels)
 
-        btn_no = QPushButton("Cancelar")
-        btn_no.setFixedHeight(38)
-        btn_no.setStyleSheet("""
-            QPushButton {
-                background: #FFFFFF; color: #333333;
-                border: 1px solid #CCCCCC; border-radius: 6px;
-                font-size: 13px; padding: 0 20px;
-            }
-            QPushButton:hover { background: #F5F5F5; }
-        """)
-        btn_no.clicked.connect(dlg.reject)
+        def add_app_action(name, callback, accels=None):
+            a = Gio.SimpleAction.new(name, None)
+            a.connect("activate", callback)
+            app.add_action(a)
+            if accels:
+                app.set_accels_for_action(f"app.{name}", accels)
 
-        btn_yes = QPushButton("Sí, cerrar")
-        btn_yes.setFixedHeight(38)
-        btn_yes.setStyleSheet("""
-            QPushButton {
-                background: #E53935; color: #FFFFFF;
-                border: none; border-radius: 6px;
-                font-size: 13px; font-weight: bold; padding: 0 20px;
-            }
-            QPushButton:hover { background: #C62828; }
-        """)
-        btn_yes.clicked.connect(dlg.accept)
+        add_win_action("new-item",       lambda *_: self._on_new_clicked(None), ["<ctrl>n"])
+        add_win_action("refresh",        self._on_refresh,                       ["F5"])
+        add_win_action("preferences",    self._on_preferences,                   ["<ctrl>comma"])
+        add_win_action("show-shortcuts", self._on_show_shortcuts,                ["<ctrl>question"])
+        add_win_action("about",          self._on_about)
+        add_app_action("quit",           lambda *_: app.quit(),                  ["<ctrl>q"])
 
-        btn_row.addStretch()
-        btn_row.addWidget(btn_no)
-        btn_row.addWidget(btn_yes)
-        layout.addLayout(btn_row)
+    # ── Action handlers ────────────────────────────────────────────────────
 
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self.close()
+    def _on_refresh(self, _action, _param):
+        child_name = self.view_stack.get_visible_child_name()
+        if child_name == "ideas":
+            self.ideas_widget.refresh()
+        elif child_name == "tareas":
+            self.tareas_widget.refresh()
+        elif child_name == "reportes":
+            self.reports_widget.refresh()
+
+    def _on_preferences(self, _action, _param):
+        from .config_widget import PreferencesWindow
+        pref = PreferencesWindow(parent=self)
+        pref.connect("categories-changed", self._on_categories_changed)
+        pref.present()
+
+    def _on_categories_changed(self, _win):
+        self.ideas_widget.refresh_categories()
+        self.reports_widget.refresh()
+
+    def _on_about(self, _action, _param):
+        about = Adw.AboutWindow(
+            transient_for=self,
+            application_name="IdeaTracker",
+            application_icon="IdeaTracker",
+            developer_name="IdeaTracker",
+            version="1.3.0",
+            comments="Gestión de ideas y planes de negocio.",
+            license_type=Gtk.License.GPL_3_0,
+            copyright="© 2024 IdeaTracker",
+        )
+        about.present()
+
+    def _on_show_shortcuts(self, _action, _param):
+        builder = Gtk.Builder.new_from_string("""
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkShortcutsWindow" id="shortcuts">
+    <property name="modal">1</property>
+    <child>
+      <object class="GtkShortcutsSection">
+        <property name="section-name">shortcuts</property>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Ideas y Tareas</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Nueva idea / tarea</property>
+                <property name="accelerator">&lt;ctrl&gt;n</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Buscar</property>
+                <property name="accelerator">&lt;ctrl&gt;f</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Actualizar lista</property>
+                <property name="accelerator">F5</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Configuración</property>
+                <property name="accelerator">&lt;ctrl&gt;comma</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Atajos de teclado</property>
+                <property name="accelerator">&lt;ctrl&gt;question</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Salir</property>
+                <property name="accelerator">&lt;ctrl&gt;q</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>
+""", -1)
+        shortcuts = builder.get_object("shortcuts")
+        shortcuts.set_transient_for(self)
+        shortcuts.present()

@@ -1,345 +1,284 @@
 from typing import Optional
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QPushButton, QLabel, QLineEdit, QTextEdit, QComboBox,
-    QScrollArea, QWidget, QFrame, QMessageBox, QListWidget,
-    QListWidgetItem
-)
-from PyQt6.QtCore import Qt
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Gtk, Adw, GObject
 
 from ..data_manager import (
     load_all_ideas, create_tarea, save_tarea,
-    cambiar_estatus_tarea, load_tarea, add_nota_tarea
+    cambiar_estatus_tarea, load_tarea, add_nota_tarea,
 )
 from ..models import Tarea
-from ..config import (
-    TAREA_STATUS_LIST, TAREA_STATUS_COLORS,
-    IDEA_DEFAULT_ID, IDEA_DEFAULT_NAME
-)
+from ..config import TAREA_STATUS_LIST, IDEA_DEFAULT_ID, IDEA_DEFAULT_NAME
 
 
-FORM_STYLE = """
-QDialog { background: #F5F7FA; }
-QLineEdit, QTextEdit, QComboBox {
-    border: 1px solid #CCCCCC; border-radius: 6px;
-    padding: 7px 10px; font-size: 13px;
-    background: #FFFFFF; color: #222222;
-}
-QComboBox:!editable { color: #222222; }
-QComboBox::drop-down { border: none; width: 24px; }
-QComboBox QAbstractItemView {
-    border: 1px solid #CCCCCC; background: #FFFFFF; color: #222222;
-    selection-background-color: #E3F2FD; selection-color: #000000;
-}
-"""
+class TareaFormWindow(Adw.Window):
+    """Secondary window for creating / editing a task."""
 
-BTN_PRIMARY = """
-QPushButton {
-    background: #2196F3; color: #FFFFFF; border: none;
-    border-radius: 6px; padding: 10px 24px; font-size: 14px; font-weight: bold;
-}
-QPushButton:hover { background: #1976D2; }
-"""
+    __gsignals__ = {
+        "tarea-saved": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
 
-BTN_SECONDARY = """
-QPushButton {
-    background: #FFFFFF; color: #333333; border: 1px solid #CCCCCC;
-    border-radius: 6px; padding: 10px 24px; font-size: 14px;
-}
-QPushButton:hover { background: #F5F5F5; }
-"""
-
-
-def _sep() -> QFrame:
-    f = QFrame()
-    f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("color: #E0E0E0;")
-    return f
-
-
-def _section(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #1A237E; margin-top: 8px;")
-    return lbl
-
-
-class TareaFormDialog(QDialog):
-    def __init__(self, tarea: Optional[Tarea] = None,
-                 idea_id: Optional[str] = None,
-                 idea_nombre: Optional[str] = None,
-                 parent=None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        tarea: Optional[Tarea] = None,
+        idea_id: Optional[str] = None,
+        idea_nombre: Optional[str] = None,
+        parent=None,
+    ):
+        super().__init__(transient_for=parent, modal=True)
         self._tarea = tarea
         self._is_edit = tarea is not None
-        # Pre-selected idea (when opened from idea form)
         self._preset_idea_id = idea_id
         self._preset_idea_nombre = idea_nombre
-        self.setWindowTitle("Editar Tarea" if self._is_edit else "Nueva Tarea")
-        self.setMinimumSize(640, 520)
-        self.resize(700, 580)
-        self.setStyleSheet(FORM_STYLE)
+        self.set_title("Editar tarea" if self._is_edit else "Nueva tarea")
+        self.set_default_size(640, 560)
+        self.set_size_request(480, 420)
         self._build_ui()
         if self._is_edit:
             self._populate_fields()
         elif self._preset_idea_id:
-            self._preset_idea()
+            self._select_preset_idea()
+
+    # ── Build UI ────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        self._toast_overlay = Adw.ToastOverlay()
+        self.set_content(self._toast_overlay)
 
-        # Header
-        header = QWidget()
-        header.setStyleSheet("background: #1A237E;")
-        hh = QHBoxLayout(header)
-        hh.setContentsMargins(24, 16, 24, 16)
-        title_lbl = QLabel("Editar Tarea" if self._is_edit else "Registrar Nueva Tarea")
-        title_lbl.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold;")
-        hh.addWidget(title_lbl)
-        root.addWidget(header)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._toast_overlay.set_child(main_box)
 
-        # Scrollable body
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: #F5F7FA; border: none; }")
+        # Header bar
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
 
-        body = QWidget()
-        body.setStyleSheet("background: #F5F7FA;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(28, 20, 28, 20)
-        bl.setSpacing(10)
+        btn_cancel = Gtk.Button(label="Cancelar")
+        btn_cancel.add_css_class("flat")
+        btn_cancel.connect("clicked", lambda _: self.close())
+        header.pack_start(btn_cancel)
 
-        # ── Fields ────────────────────────────────────────
-        bl.addWidget(_section("Información de la Tarea"))
+        self.btn_save = Gtk.Button(label="Guardar")
+        self.btn_save.add_css_class("suggested-action")
+        self.btn_save.connect("clicked", self._on_save)
+        header.pack_end(self.btn_save)
 
-        fl = QFormLayout()
-        fl.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        fl.setHorizontalSpacing(16)
-        fl.setVerticalSpacing(10)
+        main_box.append(header)
 
-        self.nombre_input = QLineEdit()
-        self.nombre_input.setPlaceholderText("Nombre de la tarea...")
-        fl.addRow("Nombre *", self.nombre_input)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        self.descripcion_input = QTextEdit()
-        self.descripcion_input.setPlaceholderText("Descripción detallada de la tarea...")
-        self.descripcion_input.setMinimumHeight(90)
-        fl.addRow("Descripción", self.descripcion_input)
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(620)
+        clamp.set_margin_start(12)
+        clamp.set_margin_end(12)
+        clamp.set_margin_top(12)
+        clamp.set_margin_bottom(24)
 
-        bl.addLayout(fl)
-        bl.addWidget(_sep())
+        form_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        clamp.set_child(form_box)
+        scroll.set_child(clamp)
+        main_box.append(scroll)
 
-        # ── Proyecto / Idea ────────────────────────────────
-        bl.addWidget(_section("Proyecto Asociado"))
+        # ── Section 1: Información ────────────────────────────────────────
+        grp_info = Adw.PreferencesGroup(title="Información de la tarea")
 
-        fl2 = QFormLayout()
-        fl2.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        fl2.setHorizontalSpacing(16)
-        fl2.setVerticalSpacing(10)
+        self.nombre_row = Adw.EntryRow(title="Nombre *")
+        grp_info.add(self.nombre_row)
 
-        self.idea_combo = QComboBox()
-        self.idea_combo.addItem(IDEA_DEFAULT_NAME, IDEA_DEFAULT_ID)
+        form_box.append(grp_info)
+
+        # Description (multi-line)
+        grp_desc = Adw.PreferencesGroup(title="Descripción")
+        self.desc_view = Gtk.TextView()
+        self.desc_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.desc_view.add_css_class("view")
+        self.desc_view.set_margin_start(12)
+        self.desc_view.set_margin_end(12)
+        self.desc_view.set_margin_top(10)
+        self.desc_view.set_margin_bottom(10)
+        scroll_desc = Gtk.ScrolledWindow()
+        scroll_desc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll_desc.set_min_content_height(80)
+        scroll_desc.set_child(self.desc_view)
+        desc_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        desc_card.add_css_class("card")
+        desc_card.append(scroll_desc)
+        grp_desc.add(desc_card)
+        form_box.append(grp_desc)
+
+        # ── Section 2: Proyecto asociado ─────────────────────────────────
+        grp_proyecto = Adw.PreferencesGroup(title="Proyecto asociado")
+
+        self.idea_row = Adw.ComboRow(title="Proyecto / Idea")
         ideas = sorted(load_all_ideas(), key=lambda i: i.nombre.lower())
-        for idea in ideas:
-            self.idea_combo.addItem(idea.nombre, idea.id)
-        fl2.addRow("Proyecto / Idea", self.idea_combo)
+        self._idea_ids = [IDEA_DEFAULT_ID] + [i.id for i in ideas]
+        idea_nombres = [IDEA_DEFAULT_NAME] + [i.nombre for i in ideas]
+        self.idea_row.set_model(Gtk.StringList.new(idea_nombres))
+        self.idea_row.set_selected(0)
+        grp_proyecto.add(self.idea_row)
 
-        # Fecha de creación (read-only in edit)
         if self._is_edit and self._tarea:
-            lbl_fecha = QLabel(self._tarea.fecha_creacion_display())
-            lbl_fecha.setStyleSheet("font-size: 13px; color: #555555; padding: 7px 0;")
-            fl2.addRow("Fecha de Creación", lbl_fecha)
+            date_row = Adw.ActionRow(title="Fecha de creación")
+            lbl = Gtk.Label(label=self._tarea.fecha_creacion_display())
+            lbl.add_css_class("dim-label")
+            lbl.set_valign(Gtk.Align.CENTER)
+            date_row.add_suffix(lbl)
+            grp_proyecto.add(date_row)
 
-        bl.addLayout(fl2)
-        bl.addWidget(_sep())
+        form_box.append(grp_proyecto)
 
-        # ── Estatus (edit mode only) ───────────────────────
+        # ── Section 3: Estatus (edit only) ────────────────────────────────
         if self._is_edit:
-            bl.addWidget(_section("Estatus"))
+            grp_status = Adw.PreferencesGroup(title="Estatus")
 
-            fl3 = QFormLayout()
-            fl3.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-            fl3.setHorizontalSpacing(16)
-            fl3.setVerticalSpacing(10)
+            self.estatus_row = Adw.ComboRow(title="Estatus actual")
+            self.estatus_row.set_model(Gtk.StringList.new(TAREA_STATUS_LIST))
+            self.estatus_row.set_selected(0)
+            grp_status.add(self.estatus_row)
 
-            self.estatus_combo = QComboBox()
-            for s in TAREA_STATUS_LIST:
-                self.estatus_combo.addItem(s, s)
-            self.estatus_combo.currentIndexChanged.connect(self._update_estatus_style)
-            fl3.addRow("Estatus", self.estatus_combo)
-            bl.addLayout(fl3)
-            bl.addWidget(_sep())
+            form_box.append(grp_status)
 
-            # ── Status history ─────────────────────────────
-            bl.addWidget(_section("Historial de Estatus"))
-            self.historial_list = QListWidget()
-            self.historial_list.setStyleSheet("""
-                QListWidget {
-                    border: 1px solid #E0E0E0; border-radius: 6px;
-                    background: #FFFFFF; font-size: 12px; color: #222222;
-                }
-                QListWidget::item { padding: 7px 10px; border-bottom: 1px solid #F0F0F0; color: #222222; }
-            """)
-            self.historial_list.setMinimumHeight(100)
-            self.historial_list.setSelectionMode(
-                QAbstractItemView.SelectionMode.NoSelection
-            )
-            bl.addWidget(self.historial_list)
+            # ── Historial ─────────────────────────────────────────────────
+            self._grp_historial = Adw.PreferencesGroup(title="Historial de estatus")
+            self._historial_box = Gtk.ListBox()
+            self._historial_box.add_css_class("boxed-list")
+            self._historial_box.set_selection_mode(Gtk.SelectionMode.NONE)
+            self._grp_historial.add(self._historial_box)
+            form_box.append(self._grp_historial)
 
-            # ── Notes ─────────────────────────────────────────
-            bl.addWidget(_sep())
-            bl.addWidget(_section("Notas / Observaciones"))
+            # ── Notas ─────────────────────────────────────────────────────
+            self._grp_notas = Adw.PreferencesGroup(title="Notas / observaciones")
+            self._notas_box = Gtk.ListBox()
+            self._notas_box.add_css_class("boxed-list")
+            self._notas_box.set_selection_mode(Gtk.SelectionMode.NONE)
+            self._grp_notas.add(self._notas_box)
 
-            self.notes_list = QListWidget()
-            self.notes_list.setStyleSheet("""
-                QListWidget {
-                    border: 1px solid #E0E0E0; border-radius: 6px;
-                    background: #FFFFFF; font-size: 12px; color: #222222;
-                }
-                QListWidget::item {
-                    padding: 8px 10px; border-bottom: 1px solid #F0F0F0; color: #222222;
-                }
-            """)
-            self.notes_list.setMinimumHeight(110)
-            self.notes_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-            bl.addWidget(self.notes_list)
+            self.nota_row = Adw.EntryRow(title="Nueva nota…")
+            btn_add = Gtk.Button(icon_name="list-add-symbolic")
+            btn_add.add_css_class("flat")
+            btn_add.set_tooltip_text("Agregar nota")
+            btn_add.set_valign(Gtk.Align.CENTER)
+            btn_add.connect("clicked", self._on_add_nota)
+            self.nota_row.add_suffix(btn_add)
+            self.nota_row.connect("entry-activated", self._on_add_nota)
+            self._grp_notas.add(self.nota_row)
+            form_box.append(self._grp_notas)
 
-            note_row = QHBoxLayout()
-            self.note_input = QLineEdit()
-            self.note_input.setPlaceholderText("Escribe una nueva nota u observación...")
-            note_row.addWidget(self.note_input)
-
-            btn_add_note = QPushButton("+ Agregar nota")
-            btn_add_note.setStyleSheet("""
-                QPushButton {
-                    background: #E8F5E9; color: #2E7D32;
-                    border: 1px solid #A5D6A7; border-radius: 6px;
-                    padding: 7px 14px; font-size: 13px; font-weight: bold;
-                }
-                QPushButton:hover { background: #C8E6C9; }
-            """)
-            btn_add_note.clicked.connect(self._add_note)
-            note_row.addWidget(btn_add_note)
-            bl.addLayout(note_row)
-
-            self._populate_notes()
-
-        bl.addStretch()
-        scroll.setWidget(body)
-        root.addWidget(scroll)
-
-        # Footer
-        footer = QWidget()
-        footer.setStyleSheet("background: #FFFFFF; border-top: 1px solid #E0E0E0;")
-        fl_foot = QHBoxLayout(footer)
-        fl_foot.setContentsMargins(24, 14, 24, 14)
-        fl_foot.addStretch()
-
-        btn_cancel = QPushButton("Cancelar")
-        btn_cancel.setStyleSheet(BTN_SECONDARY)
-        btn_cancel.clicked.connect(self.reject)
-        fl_foot.addWidget(btn_cancel)
-
-        btn_save = QPushButton("💾  Guardar")
-        btn_save.setStyleSheet(BTN_PRIMARY)
-        btn_save.clicked.connect(self._save)
-        fl_foot.addWidget(btn_save)
-
-        root.addWidget(footer)
-
-    # ── Helpers ────────────────────────────────────────────────────────────
+    # ── Populate ────────────────────────────────────────────────────────────
 
     def _populate_fields(self):
         t = self._tarea
-        self.nombre_input.setText(t.nombre)
-        self.descripcion_input.setPlainText(t.descripcion)
+        self.nombre_row.set_text(t.nombre)
+        buf = self.desc_view.get_buffer()
+        buf.set_text(t.descripcion)
 
-        for i in range(self.idea_combo.count()):
-            if self.idea_combo.itemData(i) == t.idea_id:
-                self.idea_combo.setCurrentIndex(i)
-                break
+        try:
+            idx = self._idea_ids.index(t.idea_id)
+            self.idea_row.set_selected(idx)
+        except ValueError:
+            pass
 
-        idx = self.estatus_combo.findData(t.estatus)
-        if idx >= 0:
-            self.estatus_combo.setCurrentIndex(idx)
-        self._update_estatus_style()
+        try:
+            est_idx = TAREA_STATUS_LIST.index(t.estatus)
+            self.estatus_row.set_selected(est_idx)
+        except ValueError:
+            pass
+
         self._populate_historial()
-        self._populate_notes()
+        self._populate_notas()
 
-    def _preset_idea(self):
-        for i in range(self.idea_combo.count()):
-            if self.idea_combo.itemData(i) == self._preset_idea_id:
-                self.idea_combo.setCurrentIndex(i)
-                return
+    def _select_preset_idea(self):
+        if self._preset_idea_id:
+            try:
+                idx = self._idea_ids.index(self._preset_idea_id)
+                self.idea_row.set_selected(idx)
+            except ValueError:
+                pass
 
     def _populate_historial(self):
-        self.historial_list.clear()
-        if self._tarea:
-            for h in reversed(self._tarea.historial_estatus):
-                item = QListWidgetItem(f"[{h.fecha_display()}]  →  {h.estatus}")
-                self.historial_list.addItem(item)
+        while True:
+            child = self._historial_box.get_first_child()
+            if child is None:
+                break
+            self._historial_box.remove(child)
 
-    def _populate_notes(self):
-        self.notes_list.clear()
-        if self._tarea:
-            if not self._tarea.notas:
-                self.notes_list.addItem(QListWidgetItem("(Sin notas registradas)"))
-            for nota in reversed(self._tarea.notas):
-                self.notes_list.addItem(
-                    QListWidgetItem(f"[{nota.fecha_display()}]  {nota.texto}")
-                )
+        if not self._tarea or not self._tarea.historial_estatus:
+            self._historial_box.append(
+                Adw.ActionRow(title="Sin historial registrado")
+            )
+            return
 
-    def _add_note(self):
+        for h in reversed(self._tarea.historial_estatus):
+            row = Adw.ActionRow(
+                title=h.estatus,
+                subtitle=h.fecha_display(),
+            )
+            self._historial_box.append(row)
+
+    def _populate_notas(self):
+        while True:
+            child = self._notas_box.get_first_child()
+            if child is None:
+                break
+            self._notas_box.remove(child)
+
+        if not self._tarea or not self._tarea.notas:
+            self._notas_box.append(
+                Adw.ActionRow(title="Sin notas registradas")
+            )
+            return
+
+        for nota in reversed(self._tarea.notas):
+            row = Adw.ActionRow(
+                title=nota.texto,
+                subtitle=nota.fecha_display(),
+            )
+            self._notas_box.append(row)
+
+    # ── Actions ─────────────────────────────────────────────────────────────
+
+    def _on_add_nota(self, *_):
         if not self._tarea:
             return
-        texto = self.note_input.text().strip()
+        texto = self.nota_row.get_text().strip()
         if not texto:
-            QMessageBox.warning(self, "Nota vacía", "Escribe el texto de la nota antes de agregar.")
+            self._show_toast("Escribe el texto de la nota.")
             return
         updated = add_nota_tarea(self._tarea.id, texto)
         if updated:
             self._tarea = updated
-            self._populate_notes()
-            self.note_input.clear()
+            self.nota_row.set_text("")
+            self._populate_notas()
 
-    def _update_estatus_style(self):
-        if not hasattr(self, 'estatus_combo'):
-            return
-        estatus = self.estatus_combo.currentData()
-        color = TAREA_STATUS_COLORS.get(estatus, "#888888")
-        self.estatus_combo.setStyleSheet(
-            f"QComboBox {{ border: 2px solid {color}; border-radius: 6px; "
-            f"padding: 7px 10px; font-size: 13px; font-weight: bold; "
-            f"color: {color}; background: #FFFFFF; }}"
-            "QComboBox:!editable { color: " + color + "; }"
-            "QComboBox::drop-down { border: none; width: 24px; }"
-            "QComboBox QAbstractItemView { border: 1px solid #CCCCCC; "
-            "background: #FFFFFF; color: #222222; "
-            "selection-background-color: #E3F2FD; }"
-        )
-
-    def _save(self):
-        nombre = self.nombre_input.text().strip()
+    def _on_save(self, _button):
+        nombre = self.nombre_row.get_text().strip()
         if not nombre:
-            QMessageBox.warning(self, "Campo requerido", "El nombre de la tarea es obligatorio.")
+            self.nombre_row.add_css_class("error")
+            self._show_toast("El nombre de la tarea es obligatorio.")
             return
+        self.nombre_row.remove_css_class("error")
 
-        descripcion = self.descripcion_input.toPlainText().strip()
-        idea_id = self.idea_combo.currentData() or IDEA_DEFAULT_ID
-        idea_nombre = self.idea_combo.currentText()
+        buf = self.desc_view.get_buffer()
+        descripcion = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
+
+        idea_idx = self.idea_row.get_selected()
+        idea_id = self._idea_ids[idea_idx] if idea_idx < len(self._idea_ids) else IDEA_DEFAULT_ID
+        idea_model = self.idea_row.get_model()
+        idea_nombre = idea_model.get_string(idea_idx) if idea_model else IDEA_DEFAULT_NAME
 
         if self._is_edit and self._tarea:
             self._tarea.nombre = nombre
             self._tarea.descripcion = descripcion
             self._tarea.idea_id = idea_id
             self._tarea.idea_nombre = idea_nombre
-            nuevo_estatus = self.estatus_combo.currentData()
+
+            nuevo_estatus = TAREA_STATUS_LIST[self.estatus_row.get_selected()]
             if nuevo_estatus != self._tarea.estatus:
                 cambiar_estatus_tarea(self._tarea.id, nuevo_estatus)
-                # Reload to get updated historial
                 updated = load_tarea(self._tarea.id)
                 if updated:
                     updated.nombre = nombre
@@ -357,8 +296,10 @@ class TareaFormDialog(QDialog):
                 idea_nombre=idea_nombre,
             )
 
-        self.accept()
+        self.emit("tarea-saved")
+        self.close()
 
-
-# Fix missing import
-from PyQt6.QtWidgets import QAbstractItemView
+    def _show_toast(self, message: str):
+        toast = Adw.Toast(title=message)
+        toast.set_timeout(4)
+        self._toast_overlay.add_toast(toast)

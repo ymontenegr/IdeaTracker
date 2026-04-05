@@ -1,327 +1,323 @@
 from datetime import datetime
 from typing import List, Optional
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
-    QLineEdit, QMessageBox, QAbstractItemView, QSizePolicy
-)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QBrush
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from ..data_manager import load_all_tareas, load_all_ideas, delete_tarea
+from gi.repository import Gtk, Adw, GObject
+
+from ..data_manager import load_all_tareas, delete_tarea, save_tarea
 from ..models import Tarea
-from ..config import TAREA_STATUS_LIST, TAREA_STATUS_COLORS, IDEA_DEFAULT_ID, IDEA_DEFAULT_NAME
+from ..config import TAREA_STATUS_LIST, IDEA_DEFAULT_ID, IDEA_DEFAULT_NAME
 
 
-TABLE_STYLE = """
-QTableWidget {
-    background: #FFFFFF; color: #222222;
-    border: none; gridline-color: #F0F0F0; font-size: 13px;
-    selection-background-color: #E3F2FD; selection-color: #000000;
-    alternate-background-color: #FAFAFA;
+# ── Status → badge CSS class ──────────────────────────────────────────────────
+STATUS_BADGE = {
+    "Por iniciar": "badge-blue",
+    "Iniciada":    "badge-yellow",
+    "Finalizada":  "badge-green",
+    "Cerrada":     "badge-gray",
 }
-QTableWidget::item { padding: 6px 10px; border-bottom: 1px solid #F5F5F5; color: #222222; }
-QTableWidget::item:selected { background: #E3F2FD; color: #000000; }
-QHeaderView::section {
-    background: #F8F9FA; color: #555555; font-weight: bold;
-    font-size: 12px; padding: 8px 10px; border: none;
-    border-bottom: 2px solid #E0E0E0; border-right: 1px solid #E8E8E8;
+STATUS_DOT = {
+    "Por iniciar": "dot-blue",
+    "Iniciada":    "dot-yellow",
+    "Finalizada":  "dot-green",
+    "Cerrada":     "dot-gray",
 }
-"""
-
-BTN_PRIMARY = """
-QPushButton {
-    background: #2196F3; color: #FFFFFF; border: none;
-    border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: bold;
-}
-QPushButton:hover { background: #1976D2; }
-"""
-
-BTN_SECONDARY = """
-QPushButton {
-    background: #FFFFFF; color: #333333; border: 1px solid #CCCCCC;
-    border-radius: 6px; padding: 6px 14px; font-size: 12px;
-}
-QPushButton:hover { background: #F5F5F5; }
-"""
-
-BTN_DANGER = """
-QPushButton {
-    background: #E53935; color: #FFFFFF; border: none;
-    border-radius: 6px; padding: 6px 14px; font-size: 12px;
-}
-QPushButton:hover { background: #C62828; }
-"""
-
-COMBO_STYLE = """
-QComboBox {
-    border: 1px solid #CCCCCC; border-radius: 6px; padding: 6px 10px;
-    font-size: 13px; background: #FFFFFF; color: #222222; min-width: 140px;
-}
-QComboBox:!editable { color: #222222; }
-QComboBox::drop-down { border: none; width: 20px; }
-QComboBox QAbstractItemView {
-    border: 1px solid #CCCCCC; background: #FFFFFF; color: #222222;
-    selection-background-color: #E3F2FD; selection-color: #000000;
-}
-"""
-
-SEARCH_STYLE = """
-QLineEdit {
-    border: 1px solid #CCCCCC; border-radius: 6px;
-    padding: 6px 12px; font-size: 13px; background: #FFFFFF;
-    color: #222222; min-width: 200px;
-}
-"""
 
 
-class TareasWidget(QWidget):
-    def __init__(self):
-        super().__init__()
+class TareasWidget(Gtk.Box):
+    def __init__(self, toast_overlay: Adw.ToastOverlay):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._toast_overlay = toast_overlay
         self._all_tareas: List[Tarea] = []
+        self._pending_delete: Optional[Tarea] = None
+
+        # idea filter data (ID list parallel to dropdown)
+        self._idea_ids: List[Optional[str]] = [None]
+
         self._build_ui()
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # ── Header ──────────────────────────────────────────
-        header = QWidget()
-        header.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #E0E0E0;")
-        hh = QHBoxLayout(header)
-        hh.setContentsMargins(24, 16, 24, 16)
-        title = QLabel("Tareas")
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #1A237E;")
-        hh.addWidget(title)
-        hh.addStretch()
-        self.btn_new = QPushButton("+ Nueva Tarea")
-        self.btn_new.setStyleSheet(BTN_PRIMARY)
-        self.btn_new.setCursor(Qt.CursorShape.PointingHandCursor)
-        hh.addWidget(self.btn_new)
-        layout.addWidget(header)
-
-        # ── Filters toolbar ──────────────────────────────────
-        toolbar = QWidget()
-        toolbar.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #E0E0E0;")
-        tb = QHBoxLayout(toolbar)
-        tb.setContentsMargins(24, 10, 24, 10)
-        tb.setSpacing(10)
-
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍  Buscar por nombre...")
-        self.search_input.setStyleSheet(SEARCH_STYLE)
-        tb.addWidget(self.search_input)
-        tb.addStretch()
-
-        lbl = QLabel("Filtrar:")
-        lbl.setStyleSheet("color: #666666; font-size: 13px;")
-        tb.addWidget(lbl)
-
-        self.filter_estatus = QComboBox()
-        self.filter_estatus.setStyleSheet(COMBO_STYLE)
-        self.filter_estatus.addItem("Todos los estatus", None)
-        for s in TAREA_STATUS_LIST:
-            self.filter_estatus.addItem(s, s)
-        tb.addWidget(self.filter_estatus)
-
-        self.filter_idea = QComboBox()
-        self.filter_idea.setStyleSheet(COMBO_STYLE)
-        tb.addWidget(self.filter_idea)
-
-        lbl2 = QLabel("Ordenar:")
-        lbl2.setStyleSheet("color: #666666; font-size: 13px; margin-left: 10px;")
-        tb.addWidget(lbl2)
-
-        self.sort_combo = QComboBox()
-        self.sort_combo.setStyleSheet(COMBO_STYLE)
-        self.sort_combo.addItem("Fecha creación (reciente)", "fecha_desc")
-        self.sort_combo.addItem("Fecha creación (antigua)", "fecha_asc")
-        self.sort_combo.addItem("Nombre (A-Z)", "nombre")
-        self.sort_combo.addItem("Estatus", "estatus")
-        tb.addWidget(self.sort_combo)
-
-        layout.addWidget(toolbar)
-
-        # ── Table ────────────────────────────────────────────
-        self.table = QTableWidget()
-        self.table.setStyleSheet(TABLE_STYLE)
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels([
-            "Nombre", "Proyecto / Idea", "Estatus",
-            "Fecha Creación", "Último Cambio", "Acciones"
-        ])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-
-        hh2 = self.table.horizontalHeader()
-        hh2.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh2.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        hh2.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        hh2.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hh2.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        hh2.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 224)
-        self.table.verticalHeader().setDefaultSectionSize(58)
-        layout.addWidget(self.table)
-
-        # ── Status bar ───────────────────────────────────────
-        self.status_label = QLabel("0 tareas")
-        self.status_label.setStyleSheet(
-            "color: #888888; font-size: 12px; padding: 6px 24px;"
-            "background: #FAFAFA; border-top: 1px solid #E0E0E0;"
-        )
-        layout.addWidget(self.status_label)
-
-        # ── Signals ──────────────────────────────────────────
-        self.btn_new.clicked.connect(self._open_new_form)
-        self.search_input.textChanged.connect(self._apply_filters)
-        self.filter_estatus.currentIndexChanged.connect(self._apply_filters)
-        self.filter_idea.currentIndexChanged.connect(self._apply_filters)
-        self.sort_combo.currentIndexChanged.connect(self._apply_filters)
-
         self.refresh()
 
-    # ── Public ─────────────────────────────────────────────────────────────
+    # ── Build UI ────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        # ── Search bar (Ctrl+F) ──────────────────────────────────────────
+        self.search_bar = Gtk.SearchBar()
+        self.search_bar.set_show_close_button(True)
+        self.search_entry = Gtk.SearchEntry(placeholder_text="Buscar por nombre…")
+        self.search_entry.set_hexpand(True)
+        self.search_bar.set_child(self.search_entry)
+        self.search_bar.connect_entry(self.search_entry)
+        self.search_entry.connect("search-changed", lambda _: self._apply_filters())
+        self.append(self.search_bar)
+
+        # ── Filter bar ────────────────────────────────────────────────────
+        filter_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        filter_bar.add_css_class("filter-bar")
+        filter_bar.set_margin_start(12)
+        filter_bar.set_margin_end(12)
+        filter_bar.set_margin_top(6)
+        filter_bar.set_margin_bottom(6)
+
+        self.btn_search = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.btn_search.set_tooltip_text("Buscar (Ctrl+F)")
+        self.btn_search.bind_property(
+            "active", self.search_bar, "search-mode-enabled",
+            GObject.BindingFlags.BIDIRECTIONAL,
+        )
+        filter_bar.append(self.btn_search)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        filter_bar.append(sep)
+
+        # Status filter
+        lbl_est = Gtk.Label(label="Estatus:")
+        lbl_est.add_css_class("dim-label")
+        filter_bar.append(lbl_est)
+
+        status_items = ["Todos"] + TAREA_STATUS_LIST
+        self.filter_est = Gtk.DropDown(
+            model=Gtk.StringList.new(status_items), selected=0
+        )
+        self.filter_est.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_est)
+
+        # Project/Idea filter
+        lbl_idea = Gtk.Label(label="Proyecto:")
+        lbl_idea.add_css_class("dim-label")
+        lbl_idea.set_margin_start(6)
+        filter_bar.append(lbl_idea)
+
+        self._idea_model = Gtk.StringList.new(["Todos los proyectos"])
+        self.filter_idea = Gtk.DropDown(model=self._idea_model, selected=0)
+        self.filter_idea.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_idea)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        filter_bar.append(spacer)
+
+        lbl_sort = Gtk.Label(label="Ordenar:")
+        lbl_sort.add_css_class("dim-label")
+        filter_bar.append(lbl_sort)
+
+        sort_items = ["Fecha (reciente)", "Fecha (antigua)", "Nombre A-Z", "Estatus"]
+        self.sort_combo = Gtk.DropDown(
+            model=Gtk.StringList.new(sort_items), selected=0
+        )
+        self.sort_combo.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.sort_combo)
+
+        self.append(filter_bar)
+
+        # ── Scrollable list ───────────────────────────────────────────────
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self._content_stack = Gtk.Stack()
+        self._content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        scroll.set_child(self._content_stack)
+
+        self._status_page = Adw.StatusPage(
+            icon_name="emblem-ok-symbolic",
+            title="Sin tareas registradas",
+            description='Haz clic en "Nueva tarea" para comenzar.',
+        )
+        self._content_stack.add_named(self._status_page, "empty")
+
+        list_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        list_outer.set_margin_start(12)
+        list_outer.set_margin_end(12)
+        list_outer.set_margin_top(12)
+        list_outer.set_margin_bottom(12)
+
+        self.list_box = Gtk.ListBox()
+        self.list_box.add_css_class("boxed-list")
+        self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        list_outer.append(self.list_box)
+        self._content_stack.add_named(list_outer, "list")
+
+        self.append(scroll)
+
+        # ── Count label ───────────────────────────────────────────────────
+        self._count_label = Gtk.Label()
+        self._count_label.add_css_class("dim-label")
+        self._count_label.add_css_class("caption")
+        self._count_label.add_css_class("count-label")
+        self._count_label.set_halign(Gtk.Align.START)
+        self.append(self._count_label)
+
+        key_ctrl = Gtk.EventControllerKey()
+        self.add_controller(key_ctrl)
+        key_ctrl.connect("key-pressed", self._on_key_pressed)
+
+    def _on_key_pressed(self, ctrl, keyval, keycode, state):
+        from gi.repository import Gdk
+        if keyval == Gdk.KEY_f and (state & Gdk.ModifierType.CONTROL_MASK):
+            self.btn_search.set_active(not self.btn_search.get_active())
+            return True
+        return False
+
+    # ── Public API ──────────────────────────────────────────────────────────
 
     def refresh(self):
         self._all_tareas = load_all_tareas()
         self._rebuild_idea_filter()
         self._apply_filters()
 
-    def refresh_for_idea(self, idea_id: str):
-        """Called when an idea is saved to refresh task list."""
-        self.refresh()
+    def open_new_form(self):
+        from .tarea_form import TareaFormWindow
+        form = TareaFormWindow(parent=self.get_root())
+        form.connect("tarea-saved", lambda _: self.refresh())
+        form.present()
 
-    # ── Private ────────────────────────────────────────────────────────────
+    # ── Private ─────────────────────────────────────────────────────────────
 
     def _rebuild_idea_filter(self):
-        current = self.filter_idea.currentData()
-        self.filter_idea.blockSignals(True)
-        self.filter_idea.clear()
-        self.filter_idea.addItem("Todos los proyectos", None)
-        self.filter_idea.addItem(IDEA_DEFAULT_NAME, IDEA_DEFAULT_ID)
+        idx = self.filter_idea.get_selected()
+        old_id = self._idea_ids[idx] if idx < len(self._idea_ids) else None
 
         ideas_en_tareas = sorted(
-            set((t.idea_id, t.idea_nombre) for t in self._all_tareas
-                if t.idea_id != IDEA_DEFAULT_ID),
-            key=lambda x: x[1].lower()
+            set(
+                (t.idea_id, t.idea_nombre)
+                for t in self._all_tareas
+            ),
+            key=lambda x: x[1].lower(),
         )
-        for iid, inombre in ideas_en_tareas:
-            self.filter_idea.addItem(inombre, iid)
 
-        for i in range(self.filter_idea.count()):
-            if self.filter_idea.itemData(i) == current:
-                self.filter_idea.setCurrentIndex(i)
+        self._idea_ids = [None] + [iid for iid, _ in ideas_en_tareas]
+        new_items = ["Todos los proyectos"] + [nombre for _, nombre in ideas_en_tareas]
+
+        while self._idea_model.get_n_items() > 0:
+            self._idea_model.remove(0)
+        for item in new_items:
+            self._idea_model.append(item)
+
+        new_idx = 0
+        for i, iid in enumerate(self._idea_ids):
+            if iid == old_id:
+                new_idx = i
                 break
-        self.filter_idea.blockSignals(False)
+        self.filter_idea.set_selected(new_idx)
 
     def _apply_filters(self):
         tareas = list(self._all_tareas)
-        search = self.search_input.text().strip().lower()
-        estatus = self.filter_estatus.currentData()
-        idea_id = self.filter_idea.currentData()
-        sort_key = self.sort_combo.currentData()
 
+        search = self.search_entry.get_text().strip().lower()
         if search:
             tareas = [t for t in tareas if search in t.nombre.lower()]
-        if estatus:
+
+        est_idx = self.filter_est.get_selected()
+        if est_idx > 0:
+            estatus = TAREA_STATUS_LIST[est_idx - 1]
             tareas = [t for t in tareas if t.estatus == estatus]
+
+        idea_idx = self.filter_idea.get_selected()
+        idea_id = self._idea_ids[idea_idx] if idea_idx < len(self._idea_ids) else None
         if idea_id:
             tareas = [t for t in tareas if t.idea_id == idea_id]
 
         STATUS_ORDER = {s: i for i, s in enumerate(TAREA_STATUS_LIST)}
-        if sort_key == "fecha_desc":
+        sort_idx = self.sort_combo.get_selected()
+        if sort_idx == 0:
             tareas.sort(key=lambda t: t.fecha_creacion, reverse=True)
-        elif sort_key == "fecha_asc":
+        elif sort_idx == 1:
             tareas.sort(key=lambda t: t.fecha_creacion)
-        elif sort_key == "nombre":
+        elif sort_idx == 2:
             tareas.sort(key=lambda t: t.nombre.lower())
-        elif sort_key == "estatus":
+        elif sort_idx == 3:
             tareas.sort(key=lambda t: STATUS_ORDER.get(t.estatus, 9))
 
-        self._populate_table(tareas)
+        self._populate_list(tareas)
         count, total = len(tareas), len(self._all_tareas)
-        self.status_label.setText(
-            f"{count} tarea{'s' if count != 1 else ''}"
-            + (f" (de {total} total)" if count != total else "")
-        )
+        suffix = f" (de {total} total)" if count != total else ""
+        self._count_label.set_label(f"  {count} tarea{'s' if count != 1 else ''}{suffix}")
 
-    def _populate_table(self, tareas: List[Tarea]):
-        self.table.setRowCount(0)
+    def _populate_list(self, tareas: List[Tarea]):
+        while True:
+            row = self.list_box.get_first_child()
+            if row is None:
+                break
+            self.list_box.remove(row)
+
+        if not tareas:
+            self._content_stack.set_visible_child_name("empty")
+            return
+
+        self._content_stack.set_visible_child_name("list")
         for tarea in tareas:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
+            self.list_box.append(self._make_row(tarea))
 
-            item_nombre = QTableWidgetItem(tarea.nombre)
-            item_nombre.setData(Qt.ItemDataRole.UserRole, tarea.id)
-            self.table.setItem(row, 0, item_nombre)
+    def _make_row(self, tarea: Tarea) -> Adw.ActionRow:
+        row = Adw.ActionRow()
+        row.set_title(tarea.nombre)
+        row.set_subtitle(f"{tarea.idea_nombre}  ·  {tarea.fecha_creacion_display()}")
+        row.set_activatable(True)
+        row.connect("activated", lambda _r: self._open_edit_form(tarea.id))
 
-            self.table.setItem(row, 1, QTableWidgetItem(tarea.idea_nombre))
+        dot = Gtk.Label(label="●")
+        dot.add_css_class(STATUS_DOT.get(tarea.estatus, "dot-gray"))
+        dot.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(dot)
 
-            color = TAREA_STATUS_COLORS.get(tarea.estatus, "#888888")
-            item_est = QTableWidgetItem(f"  {tarea.estatus}")
-            item_est.setForeground(QBrush(QColor(color)))
-            item_est.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-            self.table.setItem(row, 2, item_est)
+        badge = Gtk.Label(label=tarea.estatus)
+        badge.add_css_class("status-badge")
+        badge.add_css_class(STATUS_BADGE.get(tarea.estatus, "badge-gray"))
+        badge.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(badge)
 
-            self.table.setItem(row, 3, QTableWidgetItem(tarea.fecha_creacion_display()))
-            self.table.setItem(row, 4, QTableWidgetItem(tarea.fecha_ultimo_cambio_display()))
+        btn_edit = Gtk.Button(icon_name="document-edit-symbolic")
+        btn_edit.add_css_class("flat")
+        btn_edit.set_tooltip_text("Editar tarea")
+        btn_edit.set_valign(Gtk.Align.CENTER)
+        btn_edit.connect("clicked", lambda _b: self._open_edit_form(tarea.id))
+        row.add_suffix(btn_edit)
 
-            self.table.setCellWidget(row, 5, self._make_actions(tarea.id))
+        btn_del = Gtk.Button(icon_name="edit-delete-symbolic")
+        btn_del.add_css_class("flat")
+        btn_del.add_css_class("destructive-action")
+        btn_del.set_tooltip_text("Eliminar tarea")
+        btn_del.set_valign(Gtk.Align.CENTER)
+        btn_del.connect("clicked", lambda _b: self._delete_tarea(tarea))
+        row.add_suffix(btn_del)
 
-    def _make_actions(self, tarea_id: str) -> QWidget:
-        w = QWidget()
-        w.setStyleSheet("background: transparent;")
-        hl = QHBoxLayout(w)
-        hl.setContentsMargins(10, 10, 10, 10)
-        hl.setSpacing(14)
-
-        btn_edit = QPushButton("✏  Editar")
-        btn_edit.setStyleSheet(BTN_SECONDARY)
-        btn_edit.setFixedSize(88, 32)
-        btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_edit.clicked.connect(lambda: self._open_edit_form(tarea_id))
-
-        btn_del = QPushButton("🗑  Borrar")
-        btn_del.setStyleSheet(BTN_DANGER)
-        btn_del.setFixedSize(96, 32)
-        btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_del.clicked.connect(lambda: self._confirm_delete(tarea_id))
-
-        hl.addWidget(btn_edit)
-        hl.addWidget(btn_del)
-        return w
-
-    def _open_new_form(self):
-        from .tarea_form import TareaFormDialog
-        dlg = TareaFormDialog(parent=self)
-        if dlg.exec():
-            self.refresh()
+        return row
 
     def _open_edit_form(self, tarea_id: str):
-        from .tarea_form import TareaFormDialog
         from ..data_manager import load_tarea
+        from .tarea_form import TareaFormWindow
         tarea = load_tarea(tarea_id)
-        if not tarea:
-            QMessageBox.warning(self, "Error", "No se encontró la tarea.")
+        if tarea is None:
+            self._toast_overlay.add_toast(
+                Adw.Toast(title="No se encontró la tarea.")
+            )
             return
-        dlg = TareaFormDialog(tarea=tarea, parent=self)
-        if dlg.exec():
-            self.refresh()
+        form = TareaFormWindow(tarea=tarea, parent=self.get_root())
+        form.connect("tarea-saved", lambda _: self.refresh())
+        form.present()
 
-    def _confirm_delete(self, tarea_id: str):
-        from ..data_manager import load_tarea
-        tarea = load_tarea(tarea_id)
-        name = tarea.nombre if tarea else tarea_id
-        reply = QMessageBox.question(
-            self, "Eliminar Tarea",
-            f"¿Estás seguro de que deseas eliminar la tarea:\n\n\"{name}\"?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            delete_tarea(tarea_id)
+    def _delete_tarea(self, tarea: Tarea):
+        if self._pending_delete is not None:
+            self._pending_delete = None
+
+        self._pending_delete = tarea
+        delete_tarea(tarea.id)
+        self.refresh()
+
+        toast = Adw.Toast(title=f"Tarea «{tarea.nombre}» eliminada")
+        toast.set_button_label("Deshacer")
+        toast.set_timeout(5)
+        toast.connect("button-clicked", self._undo_delete)
+        toast.connect("dismissed", lambda _: setattr(self, "_pending_delete", None))
+        self._toast_overlay.add_toast(toast)
+
+    def _undo_delete(self, _toast):
+        if self._pending_delete is not None:
+            save_tarea(self._pending_delete)
+            self._pending_delete = None
             self.refresh()

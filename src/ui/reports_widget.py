@@ -1,189 +1,127 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import List
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFrame, QGroupBox, QSizePolicy, QMessageBox
-)
-from PyQt6.QtCore import Qt
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gio", "2.0")
+gi.require_version("GLib", "2.0")
+
+from gi.repository import Gtk, Adw, Gio, GLib
 
 from ..data_manager import load_all_ideas, load_idea, load_all_tareas, load_tarea
 from ..models import Idea
 
 
-BTN_PRIMARY = """
-QPushButton {
-    background: #2196F3; color: white; border: none;
-    border-radius: 6px; padding: 10px 22px; font-size: 14px; font-weight: bold;
-}
-QPushButton:hover { background: #1976D2; }
-QPushButton:disabled { background: #90CAF9; }
-"""
-
-COMBO_STYLE = """
-QComboBox {
-    border: 1px solid #CCCCCC; border-radius: 6px;
-    padding: 8px 12px; font-size: 13px;
-    background: #FFFFFF; color: #222222; min-width: 200px;
-}
-QComboBox:!editable { color: #222222; }
-QComboBox:!editable:on { color: #222222; }
-QComboBox::drop-down { border: none; width: 24px; }
-QComboBox QAbstractItemView {
-    border: 1px solid #CCCCCC;
-    background: #FFFFFF;
-    color: #222222;
-    selection-background-color: #E3F2FD;
-    selection-color: #000000;
-}
-QComboBox QAbstractItemView::item { color: #222222; }
-QComboBox QAbstractItemView::item:selected { color: #000000; }
-"""
-
-GROUP_STYLE = """
-QGroupBox {
-    font-size: 14px; font-weight: bold; color: #1A237E;
-    border: 1px solid #E0E0E0; border-radius: 10px;
-    margin-top: 14px; background: white;
-    padding: 16px;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 16px; top: 4px;
-    padding: 0 6px;
-    background: white;
-}
-"""
-
-
-class ReportsWidget(QWidget):
-    def __init__(self):
-        super().__init__()
+class ReportsWidget(Gtk.Box):
+    def __init__(self, toast_overlay: Adw.ToastOverlay):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._toast_overlay = toast_overlay
         self._ideas: List[Idea] = []
         self._build_ui()
+        self.refresh()
+
+    # ── Build UI ────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        # Header
-        header = QWidget()
-        header.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #E0E0E0;")
-        hh = QHBoxLayout(header)
-        hh.setContentsMargins(24, 16, 24, 16)
-        title = QLabel("Reportes")
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #1A237E;")
-        hh.addWidget(title)
-        layout.addWidget(header)
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(800)
+        clamp.set_margin_start(12)
+        clamp.set_margin_end(12)
+        clamp.set_margin_top(24)
+        clamp.set_margin_bottom(24)
 
-        # Content
-        content = QWidget()
-        content.setStyleSheet("background: #F5F7FA;")
-        cl = QVBoxLayout(content)
-        cl.setContentsMargins(40, 32, 40, 32)
-        cl.setSpacing(24)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        clamp.set_child(content)
+        scroll.set_child(clamp)
+        self.append(scroll)
 
-        # ── Report 1: Detallado por Idea ─────────────────────
-        grp1 = QGroupBox("📄  Reporte Detallado por Idea")
-        grp1.setStyleSheet(GROUP_STYLE)
-        g1l = QVBoxLayout(grp1)
-        g1l.setSpacing(14)
-
-        desc1 = QLabel(
-            "Genera el reporte completo de una idea: todos sus campos, historial de notas "
-            "y semáforo de estatus."
+        # ── Report 1: Idea detail ─────────────────────────────────────────
+        grp1 = Adw.PreferencesGroup(
+            title="Reporte detallado por idea",
+            description=(
+                "Muestra todos los campos de una idea, historial de notas "
+                "y estatus actual."
+            ),
         )
-        desc1.setStyleSheet("color: #555; font-size: 13px;")
-        desc1.setWordWrap(True)
-        g1l.addWidget(desc1)
 
-        row1 = QHBoxLayout()
-        lbl_idea = QLabel("Idea:")
-        lbl_idea.setStyleSheet("font-size: 13px; color: #333; font-weight: normal;")
-        row1.addWidget(lbl_idea)
+        self.idea_row = Adw.ComboRow(title="Seleccionar idea")
+        self._idea_model = Gtk.StringList.new([])
+        self.idea_row.set_model(self._idea_model)
+        grp1.add(self.idea_row)
 
-        self.idea_combo = QComboBox()
-        self.idea_combo.setStyleSheet(COMBO_STYLE)
-        self.idea_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        row1.addWidget(self.idea_combo)
-
-        btn_detail = QPushButton("Ver Reporte")
-        btn_detail.setStyleSheet(BTN_PRIMARY)
-        btn_detail.clicked.connect(self._preview_detail)
-        row1.addWidget(btn_detail)
-        g1l.addLayout(row1)
-
-        cl.addWidget(grp1)
-
-        # ── Report 2: Mensual ────────────────────────────────
-        grp2 = QGroupBox("📊  Reporte Mensual de Ideas")
-        grp2.setStyleSheet(GROUP_STYLE)
-        g2l = QVBoxLayout(grp2)
-        g2l.setSpacing(14)
-
-        desc2 = QLabel(
-            "Genera un resumen tabular con todas las ideas registradas en un mes/año específico."
+        btn_row1 = self._make_button_row(
+            on_view=self._on_view_idea,
+            on_pdf=self._on_pdf_idea,
         )
-        desc2.setStyleSheet("color: #555; font-size: 13px;")
-        desc2.setWordWrap(True)
-        g2l.addWidget(desc2)
+        grp1.add(btn_row1)
+        content.append(grp1)
 
-        row2 = QHBoxLayout()
-        lbl_mes = QLabel("Mes:")
-        lbl_mes.setStyleSheet("font-size: 13px; color: #333; font-weight: normal;")
-        row2.addWidget(lbl_mes)
-
-        self.mes_combo = QComboBox()
-        self.mes_combo.setStyleSheet(COMBO_STYLE)
-        row2.addWidget(self.mes_combo)
-
-        row2.addStretch()
-
-        btn_monthly = QPushButton("Ver Reporte")
-        btn_monthly.setStyleSheet(BTN_PRIMARY)
-        btn_monthly.clicked.connect(self._preview_monthly)
-        row2.addWidget(btn_monthly)
-        g2l.addLayout(row2)
-
-        cl.addWidget(grp2)
-
-        # ── Report 3: Task Detail ─────────────────────────────
-        grp3 = QGroupBox("✅  Reporte Detallado de Tarea")
-        grp3.setStyleSheet(GROUP_STYLE)
-        g3l = QVBoxLayout(grp3)
-        g3l.setSpacing(14)
-
-        desc3 = QLabel(
-            "Genera el reporte completo de una tarea: descripción, estatus actual "
-            "e historial completo de cambios de estatus."
+        # ── Report 2: Monthly ─────────────────────────────────────────────
+        grp2 = Adw.PreferencesGroup(
+            title="Reporte mensual de ideas",
+            description=(
+                "Resumen de todas las ideas registradas en un mes/año "
+                "específico, con totales por estatus."
+            ),
         )
-        desc3.setStyleSheet("color: #555555; font-size: 13px;")
-        desc3.setWordWrap(True)
-        g3l.addWidget(desc3)
 
-        row3 = QHBoxLayout()
-        lbl_tarea = QLabel("Tarea:")
-        lbl_tarea.setStyleSheet("font-size: 13px; color: #333333; font-weight: normal;")
-        row3.addWidget(lbl_tarea)
+        self.mes_row = Adw.ComboRow(title="Seleccionar mes")
+        self._mes_model = Gtk.StringList.new([])
+        self.mes_row.set_model(self._mes_model)
+        grp2.add(self.mes_row)
 
-        self.tarea_combo = QComboBox()
-        self.tarea_combo.setStyleSheet(COMBO_STYLE)
-        self.tarea_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        row3.addWidget(self.tarea_combo)
+        btn_row2 = self._make_button_row(
+            on_view=self._on_view_monthly,
+            on_pdf=self._on_pdf_monthly,
+        )
+        grp2.add(btn_row2)
+        content.append(grp2)
 
-        btn_task = QPushButton("Ver Reporte")
-        btn_task.setStyleSheet(BTN_PRIMARY)
-        btn_task.clicked.connect(self._preview_task)
-        row3.addWidget(btn_task)
-        g3l.addLayout(row3)
+        # ── Report 3: Task detail ─────────────────────────────────────────
+        grp3 = Adw.PreferencesGroup(
+            title="Reporte detallado de tarea",
+            description=(
+                "Muestra la descripción, estatus actual e historial completo "
+                "de cambios de una tarea."
+            ),
+        )
 
-        cl.addWidget(grp3)
-        cl.addStretch()
-        layout.addWidget(content)
+        self.tarea_row = Adw.ComboRow(title="Seleccionar tarea")
+        self._tarea_model = Gtk.StringList.new([])
+        self.tarea_row.set_model(self._tarea_model)
+        grp3.add(self.tarea_row)
 
-        self.refresh()
+        btn_row3 = self._make_button_row(
+            on_view=self._on_view_task,
+            on_pdf=self._on_pdf_task,
+        )
+        grp3.add(btn_row3)
+        content.append(grp3)
+
+    def _make_button_row(self, on_view, on_pdf) -> Gtk.Box:
+        """Returns a row with [Ver reporte] [Generar PDF] buttons."""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_halign(Gtk.Align.END)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+
+        btn_view = Gtk.Button(label="Ver reporte")
+        btn_view.add_css_class("suggested-action")
+        btn_view.connect("clicked", lambda _: on_view())
+        box.append(btn_view)
+
+        btn_pdf = Gtk.Button(label="Generar PDF")
+        btn_pdf.connect("clicked", lambda _: on_pdf())
+        box.append(btn_pdf)
+
+        return box
+
+    # ── Public API ──────────────────────────────────────────────────────────
 
     def refresh(self):
         self._ideas = load_all_ideas()
@@ -191,107 +129,213 @@ class ReportsWidget(QWidget):
         self._populate_month_combo()
         self._populate_tarea_combo()
 
-    def _populate_tarea_combo(self):
-        self.tarea_combo.clear()
-        tareas = sorted(load_all_tareas(), key=lambda t: t.nombre.lower())
-        for t in tareas:
-            label = f"{t.nombre}  [{t.idea_nombre}]"
-            self.tarea_combo.addItem(label, t.id)
-        if not tareas:
-            self.tarea_combo.addItem("(No hay tareas registradas)", None)
+    # ── Populate combos ─────────────────────────────────────────────────────
 
     def _populate_idea_combo(self):
-        self.idea_combo.clear()
-        ideas_sorted = sorted(self._ideas, key=lambda i: i.nombre.lower())
-        for idea in ideas_sorted:
-            self.idea_combo.addItem(idea.nombre, idea.id)
-        if not ideas_sorted:
-            self.idea_combo.addItem("(No hay ideas registradas)", None)
+        while self._idea_model.get_n_items() > 0:
+            self._idea_model.remove(0)
+        self._idea_ids: List[str] = []
+
+        ideas = sorted(self._ideas, key=lambda i: i.nombre.lower())
+        if ideas:
+            for idea in ideas:
+                self._idea_model.append(idea.nombre)
+                self._idea_ids.append(idea.id)
+        else:
+            self._idea_model.append("(Sin ideas registradas)")
+            self._idea_ids.append("")
+        self.idea_row.set_selected(0)
 
     def _populate_month_combo(self):
-        self.mes_combo.clear()
-        months = sorted(set(i.mes_registro() for i in self._ideas), reverse=True)
-        for year, month in months:
-            if year == 0:
-                continue
-            label = datetime(year, month, 1).strftime("%B %Y").capitalize()
-            self.mes_combo.addItem(label, (year, month))
-        if not months or all(y == 0 for y, m in months):
-            self.mes_combo.addItem("(No hay datos)", None)
+        while self._mes_model.get_n_items() > 0:
+            self._mes_model.remove(0)
+        self._mes_data: List = []
 
-    def _preview_detail(self):
-        idea_id = self.idea_combo.currentData()
-        if not idea_id:
-            QMessageBox.information(self, "Sin ideas", "No hay ideas registradas.")
-            return
-        idea = load_idea(idea_id)
-        if idea is None:
-            QMessageBox.warning(self, "Error", "No se encontró la idea.")
-            return
-
-        from ..pdf_generator import generate_detail_report
-        from .pdf_preview import PDFPreviewDialog
-
-        try:
-            pdf_bytes = generate_detail_report(idea)
-        except Exception as e:
-            QMessageBox.critical(self, "Error generando PDF", str(e))
-            return
-
-        dlg = PDFPreviewDialog(
-            pdf_bytes=pdf_bytes,
-            suggested_name=f"reporte_idea_{idea.nombre[:30].replace(' ', '_')}",
-            parent=self,
+        months = sorted(
+            set(i.mes_registro() for i in self._ideas), reverse=True
         )
-        dlg.exec()
+        months = [(y, m) for y, m in months if y != 0]
 
-    def _preview_monthly(self):
-        mes_data = self.mes_combo.currentData()
-        if not mes_data:
-            QMessageBox.information(self, "Sin datos", "No hay datos para generar el reporte.")
+        if months:
+            for y, m in months:
+                self._mes_model.append(
+                    datetime(y, m, 1).strftime("%B %Y").capitalize()
+                )
+                self._mes_data.append((y, m))
+        else:
+            self._mes_model.append("(Sin datos)")
+            self._mes_data.append(None)
+        self.mes_row.set_selected(0)
+
+    def _populate_tarea_combo(self):
+        while self._tarea_model.get_n_items() > 0:
+            self._tarea_model.remove(0)
+        self._tarea_ids: List[str] = []
+
+        tareas = sorted(load_all_tareas(), key=lambda t: t.nombre.lower())
+        if tareas:
+            for t in tareas:
+                self._tarea_model.append(f"{t.nombre}  [{t.idea_nombre}]")
+                self._tarea_ids.append(t.id)
+        else:
+            self._tarea_model.append("(Sin tareas registradas)")
+            self._tarea_ids.append("")
+        self.tarea_row.set_selected(0)
+
+    # ── View handlers ────────────────────────────────────────────────────────
+
+    def _on_view_idea(self):
+        idea = self._get_selected_idea()
+        if not idea:
             return
-        year, month = mes_data
-        ideas_mes = [i for i in self._ideas if i.mes_registro() == (year, month)]
+        from .report_view import IdeaReportWindow
+        IdeaReportWindow(idea=idea, parent=self.get_root()).present()
 
-        from ..pdf_generator import generate_monthly_report
-        from .pdf_preview import PDFPreviewDialog
-
-        try:
-            pdf_bytes = generate_monthly_report(ideas_mes, month, year)
-        except Exception as e:
-            QMessageBox.critical(self, "Error generando PDF", str(e))
+    def _on_view_monthly(self):
+        data = self._get_selected_month()
+        if not data:
             return
+        year, month, ideas_mes = data
+        from .report_view import MonthlyReportWindow
+        MonthlyReportWindow(ideas=ideas_mes, month=month, year=year, parent=self.get_root()).present()
 
+    def _on_view_task(self):
+        tarea = self._get_selected_tarea()
+        if not tarea:
+            return
+        from .report_view import TaskReportWindow
+        TaskReportWindow(tarea=tarea, parent=self.get_root()).present()
+
+    # ── PDF handlers ─────────────────────────────────────────────────────────
+
+    def _on_pdf_idea(self):
+        idea = self._get_selected_idea()
+        if not idea:
+            return
+        suggested = f"reporte_idea_{idea.nombre[:30].replace(' ', '_')}"
+        self._save_pdf(
+            lambda: self._gen_pdf_idea(idea),
+            suggested,
+        )
+
+    def _on_pdf_monthly(self):
+        data = self._get_selected_month()
+        if not data:
+            return
+        year, month, ideas_mes = data
         month_str = datetime(year, month, 1).strftime("%B_%Y")
-        dlg = PDFPreviewDialog(
-            pdf_bytes=pdf_bytes,
-            suggested_name=f"reporte_mensual_{month_str}",
-            parent=self,
+        self._save_pdf(
+            lambda: self._gen_pdf_monthly(ideas_mes, month, year),
+            f"reporte_mensual_{month_str}",
         )
-        dlg.exec()
 
-    def _preview_task(self):
-        tarea_id = self.tarea_combo.currentData()
-        if not tarea_id:
-            QMessageBox.information(self, "Sin tareas", "No hay tareas registradas.")
+    def _on_pdf_task(self):
+        tarea = self._get_selected_tarea()
+        if not tarea:
             return
-        tarea = load_tarea(tarea_id)
-        if tarea is None:
-            QMessageBox.warning(self, "Error", "No se encontró la tarea.")
-            return
+        suggested = f"reporte_tarea_{tarea.nombre[:30].replace(' ', '_')}"
+        self._save_pdf(
+            lambda: self._gen_pdf_task(tarea),
+            suggested,
+        )
 
-        from ..pdf_generator import generate_task_report
-        from .pdf_preview import PDFPreviewDialog
+    # ── PDF generation + save dialog ────────────────────────────────────────
 
+    def _save_pdf(self, generator_fn, suggested_name: str):
+        """Generate PDF bytes then open FileDialog to save."""
         try:
-            pdf_bytes = generate_task_report(tarea)
+            pdf_bytes = generator_fn()
         except Exception as e:
-            QMessageBox.critical(self, "Error generando PDF", str(e))
+            self._show_toast(f"Error generando PDF: {e}")
             return
 
-        dlg = PDFPreviewDialog(
-            pdf_bytes=pdf_bytes,
-            suggested_name=f"reporte_tarea_{tarea.nombre[:30].replace(' ', '_')}",
-            parent=self,
-        )
-        dlg.exec()
+        from datetime import datetime as dt
+        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{suggested_name}_{timestamp}.pdf"
+
+        pdf_filter = Gtk.FileFilter()
+        pdf_filter.set_name("Archivos PDF")
+        pdf_filter.add_mime_type("application/pdf")
+
+        filters = Gio.ListStore(item_type=Gtk.FileFilter)
+        filters.append(pdf_filter)
+
+        from ..config import EXPORTS_DIR
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Guardar reporte PDF")
+        dialog.set_initial_name(filename)
+        dialog.set_filters(filters)
+        try:
+            dialog.set_initial_folder(
+                Gio.File.new_for_path(str(EXPORTS_DIR))
+            )
+        except Exception:
+            pass
+
+        def on_response(dlg, result):
+            try:
+                file = dlg.save_finish(result)
+                if file is None:
+                    return
+                path = file.get_path()
+                if not path.lower().endswith(".pdf"):
+                    path += ".pdf"
+                with open(path, "wb") as f:
+                    f.write(pdf_bytes)
+                toast = Adw.Toast(title="PDF guardado")
+                toast.set_timeout(4)
+                self._toast_overlay.add_toast(toast)
+            except GLib.Error:
+                pass  # User cancelled
+            except Exception as e:
+                self._show_toast(f"Error al guardar: {e}")
+
+        dialog.save(self.get_root(), None, on_response)
+
+    # ── Data helpers ─────────────────────────────────────────────────────────
+
+    def _get_selected_idea(self):
+        idx = self.idea_row.get_selected()
+        if not self._idea_ids or not self._idea_ids[idx]:
+            self._show_toast("No hay ideas registradas.")
+            return None
+        idea = load_idea(self._idea_ids[idx])
+        if idea is None:
+            self._show_toast("No se encontró la idea.")
+        return idea
+
+    def _get_selected_month(self):
+        idx = self.mes_row.get_selected()
+        if not self._mes_data or self._mes_data[idx] is None:
+            self._show_toast("No hay datos para este período.")
+            return None
+        year, month = self._mes_data[idx]
+        ideas_mes = [i for i in self._ideas if i.mes_registro() == (year, month)]
+        return year, month, ideas_mes
+
+    def _get_selected_tarea(self):
+        idx = self.tarea_row.get_selected()
+        if not self._tarea_ids or not self._tarea_ids[idx]:
+            self._show_toast("No hay tareas registradas.")
+            return None
+        tarea = load_tarea(self._tarea_ids[idx])
+        if tarea is None:
+            self._show_toast("No se encontró la tarea.")
+        return tarea
+
+    def _gen_pdf_idea(self, idea):
+        from ..pdf_generator import generate_detail_report
+        return generate_detail_report(idea)
+
+    def _gen_pdf_monthly(self, ideas, month, year):
+        from ..pdf_generator import generate_monthly_report
+        return generate_monthly_report(ideas, month, year)
+
+    def _gen_pdf_task(self, tarea):
+        from ..pdf_generator import generate_task_report
+        return generate_task_report(tarea)
+
+    def _show_toast(self, message: str):
+        toast = Adw.Toast(title=message)
+        toast.set_timeout(4)
+        self._toast_overlay.add_toast(toast)

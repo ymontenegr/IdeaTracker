@@ -1,438 +1,431 @@
 from datetime import datetime
 from typing import List, Optional
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
-    QLineEdit, QMessageBox, QAbstractItemView, QFrame,
-    QSizePolicy
-)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QBrush
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from ..data_manager import load_all_ideas, load_categories, delete_idea
+from gi.repository import Gtk, Adw, GObject
+
+from ..data_manager import load_all_ideas, load_categories, delete_idea, save_idea
 from ..models import Idea
-from ..config import STATUS_COLORS, STATUS_LIST, PRIORIDADES, PRIORIDAD_COLORS
+from ..config import STATUS_LIST, PRIORIDADES
 
 
-TOOLBAR_STYLE = """
-QWidget#toolbar {
-    background: #FFFFFF;
-    border-bottom: 1px solid #E0E0E0;
+# ── Status → badge CSS class mapping ─────────────────────────────────────────
+STATUS_BADGE = {
+    "Por iniciar": "badge-blue",
+    "Iniciado":    "badge-yellow",
+    "En proceso":  "badge-orange",
+    "Finalizado":  "badge-green",
+    "Postergado":  "badge-gray",
+    "Cancelado":   "badge-red",
 }
-"""
-
-TABLE_STYLE = """
-QTableWidget {
-    background: #FFFFFF;
-    color: #222222;
-    border: none;
-    gridline-color: #F0F0F0;
-    font-size: 13px;
-    selection-background-color: #E3F2FD;
-    selection-color: #000000;
+STATUS_DOT = {
+    "Por iniciar": "dot-blue",
+    "Iniciado":    "dot-yellow",
+    "En proceso":  "dot-orange",
+    "Finalizado":  "dot-green",
+    "Postergado":  "dot-gray",
+    "Cancelado":   "dot-red",
 }
-QTableWidget::item {
-    padding: 6px 10px;
-    border-bottom: 1px solid #F5F5F5;
-    color: #222222;
+PRIORIDAD_DOT = {
+    "Alta":  "dot-red",
+    "Media": "dot-orange",
+    "Baja":  "dot-green",
 }
-QTableWidget::item:selected {
-    background: #E3F2FD;
-    color: #000000;
-}
-QHeaderView::section {
-    background: #F8F9FA;
-    color: #555555;
-    font-weight: bold;
-    font-size: 12px;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 2px solid #E0E0E0;
-    border-right: 1px solid #E8E8E8;
-}
-"""
-
-BTN_PRIMARY = """
-QPushButton {
-    background: #2196F3;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: bold;
-}
-QPushButton:hover { background: #1976D2; }
-QPushButton:pressed { background: #1565C0; }
-"""
-
-BTN_DANGER = """
-QPushButton {
-    background: #F44336;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: bold;
-}
-QPushButton:hover { background: #D32F2F; }
-"""
-
-BTN_SECONDARY = """
-QPushButton {
-    background: #FFFFFF;
-    color: #333;
-    border: 1px solid #CCC;
-    border-radius: 6px;
-    padding: 8px 18px;
-    font-size: 13px;
-}
-QPushButton:hover { background: #F5F5F5; }
-"""
-
-COMBO_STYLE = """
-QComboBox {
-    border: 1px solid #CCCCCC;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 13px;
-    background: #FFFFFF;
-    color: #222222;
-    min-width: 130px;
-}
-QComboBox:!editable { color: #222222; }
-QComboBox:!editable:on { color: #222222; }
-QComboBox::drop-down { border: none; width: 20px; }
-QComboBox QAbstractItemView {
-    border: 1px solid #CCCCCC;
-    background: #FFFFFF;
-    color: #222222;
-    selection-background-color: #E3F2FD;
-    selection-color: #000000;
-}
-QComboBox QAbstractItemView::item { color: #222222; }
-QComboBox QAbstractItemView::item:selected { color: #000000; }
-"""
-
-SEARCH_STYLE = """
-QLineEdit {
-    border: 1px solid #CCC;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-    background: white;
-    min-width: 200px;
-}
-"""
 
 
-class IdeasWidget(QWidget):
-    def __init__(self):
-        super().__init__()
+class IdeasWidget(Gtk.Box):
+    def __init__(self, toast_overlay: Adw.ToastOverlay):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._toast_overlay = toast_overlay
         self._all_ideas: List[Idea] = []
+        self._pending_delete: Optional[Idea] = None   # for undo
+
+        # Category ID list parallel to filter dropdown items
+        self._cat_ids: List[Optional[str]] = [None]  # index 0 = "Todas"
+
         self._build_ui()
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # ── Header ──────────────────────────────────────────
-        header = QWidget()
-        header.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #E0E0E0;")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 16, 24, 16)
-
-        title = QLabel("Ideas & Planes")
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #1A237E;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
-
-        self.btn_new = QPushButton("+ Nueva Idea")
-        self.btn_new.setStyleSheet(BTN_PRIMARY)
-        self.btn_new.setCursor(Qt.CursorShape.PointingHandCursor)
-        header_layout.addWidget(self.btn_new)
-
-        layout.addWidget(header)
-
-        # ── Filters toolbar ─────────────────────────────────
-        toolbar = QWidget()
-        toolbar.setObjectName("toolbar")
-        toolbar.setStyleSheet(TOOLBAR_STYLE)
-        tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(24, 10, 24, 10)
-        tb_layout.setSpacing(10)
-
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍  Buscar por nombre...")
-        self.search_input.setStyleSheet(SEARCH_STYLE)
-        tb_layout.addWidget(self.search_input)
-
-        tb_layout.addStretch()
-
-        lbl_filter = QLabel("Filtrar:")
-        lbl_filter.setStyleSheet("color: #666; font-size: 13px;")
-        tb_layout.addWidget(lbl_filter)
-
-        self.filter_cat = QComboBox()
-        self.filter_cat.setStyleSheet(COMBO_STYLE)
-        self.filter_cat.addItem("Todas las categorías", None)
-        tb_layout.addWidget(self.filter_cat)
-
-        self.filter_prioridad = QComboBox()
-        self.filter_prioridad.setStyleSheet(COMBO_STYLE)
-        self.filter_prioridad.addItem("Todas las prioridades", None)
-        for p in PRIORIDADES:
-            self.filter_prioridad.addItem(p, p)
-        tb_layout.addWidget(self.filter_prioridad)
-
-        self.filter_estatus = QComboBox()
-        self.filter_estatus.setStyleSheet(COMBO_STYLE)
-        self.filter_estatus.addItem("Todos los estatus", None)
-        for s in STATUS_LIST:
-            self.filter_estatus.addItem(s, s)
-        tb_layout.addWidget(self.filter_estatus)
-
-        self.filter_mes = QComboBox()
-        self.filter_mes.setStyleSheet(COMBO_STYLE)
-        self.filter_mes.addItem("Todos los meses", None)
-        tb_layout.addWidget(self.filter_mes)
-
-        lbl_sort = QLabel("Ordenar:")
-        lbl_sort.setStyleSheet("color: #666; font-size: 13px; margin-left: 10px;")
-        tb_layout.addWidget(lbl_sort)
-
-        self.sort_combo = QComboBox()
-        self.sort_combo.setStyleSheet(COMBO_STYLE)
-        self.sort_combo.addItem("Fecha (más reciente)", "fecha_desc")
-        self.sort_combo.addItem("Fecha (más antigua)", "fecha_asc")
-        self.sort_combo.addItem("Prioridad", "prioridad")
-        self.sort_combo.addItem("Nombre (A-Z)", "nombre")
-        tb_layout.addWidget(self.sort_combo)
-
-        layout.addWidget(toolbar)
-
-        # ── Table ────────────────────────────────────────────
-        self.table = QTableWidget()
-        self.table.setStyleSheet(TABLE_STYLE)
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "Nombre", "Categoría", "Prioridad", "Estatus",
-            "Fecha Registro", "Fecha Inicio", "Acciones"
-        ])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet(TABLE_STYLE + "QTableWidget { alternate-background-color: #FAFAFA; }")
-
-        hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 224)
-        self.table.setRowHeight(0, 58)
-        self.table.verticalHeader().setDefaultSectionSize(58)
-
-        layout.addWidget(self.table)
-
-        # ── Status bar ───────────────────────────────────────
-        self.status_label = QLabel("0 ideas")
-        self.status_label.setStyleSheet(
-            "color: #888; font-size: 12px; padding: 6px 24px;"
-            "background: #FAFAFA; border-top: 1px solid #E0E0E0;"
-        )
-        layout.addWidget(self.status_label)
-
-        # ── Signals ─────────────────────────────────────────
-        self.btn_new.clicked.connect(self._open_new_form)
-        self.search_input.textChanged.connect(self._apply_filters)
-        self.filter_cat.currentIndexChanged.connect(self._apply_filters)
-        self.filter_prioridad.currentIndexChanged.connect(self._apply_filters)
-        self.filter_estatus.currentIndexChanged.connect(self._apply_filters)
-        self.filter_mes.currentIndexChanged.connect(self._apply_filters)
-        self.sort_combo.currentIndexChanged.connect(self._apply_filters)
-
         self.refresh()
 
-    # ── Public ─────────────────────────────────────────────────────────────
+    # ── Build UI ────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        # ── Search bar (Ctrl+F) ──────────────────────────────────────────
+        self.search_bar = Gtk.SearchBar()
+        self.search_bar.set_show_close_button(True)
+        self.search_entry = Gtk.SearchEntry(placeholder_text="Buscar por nombre…")
+        self.search_entry.set_hexpand(True)
+        self.search_bar.set_child(self.search_entry)
+        self.search_bar.connect_entry(self.search_entry)
+        self.search_entry.connect("search-changed", lambda _: self._apply_filters())
+        self.append(self.search_bar)
+
+        # ── Filter bar ────────────────────────────────────────────────────
+        filter_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        filter_bar.add_css_class("filter-bar")
+        filter_bar.set_margin_start(12)
+        filter_bar.set_margin_end(12)
+        filter_bar.set_margin_top(6)
+        filter_bar.set_margin_bottom(6)
+
+        # Search toggle button
+        self.btn_search = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.btn_search.set_tooltip_text("Buscar (Ctrl+F)")
+        self.btn_search.bind_property(
+            "active", self.search_bar, "search-mode-enabled",
+            GObject.BindingFlags.BIDIRECTIONAL,
+        )
+        filter_bar.append(self.btn_search)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        filter_bar.append(sep)
+
+        # Category filter
+        lbl_cat = Gtk.Label(label="Categoría:")
+        lbl_cat.add_css_class("dim-label")
+        filter_bar.append(lbl_cat)
+
+        self._cat_model = Gtk.StringList.new(["Todas"])
+        self.filter_cat = Gtk.DropDown(model=self._cat_model, selected=0)
+        self.filter_cat.set_tooltip_text("Filtrar por categoría")
+        self.filter_cat.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_cat)
+
+        # Priority filter
+        lbl_prio = Gtk.Label(label="Prioridad:")
+        lbl_prio.add_css_class("dim-label")
+        lbl_prio.set_margin_start(6)
+        filter_bar.append(lbl_prio)
+
+        prio_items = ["Todas"] + PRIORIDADES
+        self.filter_prio = Gtk.DropDown(
+            model=Gtk.StringList.new(prio_items), selected=0
+        )
+        self.filter_prio.set_tooltip_text("Filtrar por prioridad")
+        self.filter_prio.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_prio)
+
+        # Status filter
+        lbl_est = Gtk.Label(label="Estatus:")
+        lbl_est.add_css_class("dim-label")
+        lbl_est.set_margin_start(6)
+        filter_bar.append(lbl_est)
+
+        status_items = ["Todos"] + STATUS_LIST
+        self.filter_est = Gtk.DropDown(
+            model=Gtk.StringList.new(status_items), selected=0
+        )
+        self.filter_est.set_tooltip_text("Filtrar por estatus")
+        self.filter_est.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_est)
+
+        # Month filter
+        lbl_mes = Gtk.Label(label="Mes:")
+        lbl_mes.add_css_class("dim-label")
+        lbl_mes.set_margin_start(6)
+        filter_bar.append(lbl_mes)
+
+        self._mes_data: List[Optional[tuple]] = [None]
+        self._mes_model = Gtk.StringList.new(["Todos los meses"])
+        self.filter_mes = Gtk.DropDown(model=self._mes_model, selected=0)
+        self.filter_mes.set_tooltip_text("Filtrar por mes de registro")
+        self.filter_mes.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.filter_mes)
+
+        # Sort
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        filter_bar.append(spacer)
+
+        lbl_sort = Gtk.Label(label="Ordenar:")
+        lbl_sort.add_css_class("dim-label")
+        filter_bar.append(lbl_sort)
+
+        sort_items = [
+            "Fecha (reciente)", "Fecha (antigua)", "Prioridad", "Nombre A-Z"
+        ]
+        self.sort_combo = Gtk.DropDown(
+            model=Gtk.StringList.new(sort_items), selected=0
+        )
+        self.sort_combo.connect("notify::selected", lambda *_: self._apply_filters())
+        filter_bar.append(self.sort_combo)
+
+        self.append(filter_bar)
+
+        # ── Scrollable list ───────────────────────────────────────────────
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        # Stack: list vs. empty state
+        self._content_stack = Gtk.Stack()
+        self._content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        scroll.set_child(self._content_stack)
+
+        # Empty state
+        self._status_page = Adw.StatusPage(
+            icon_name="document-edit-symbolic",
+            title="Sin ideas registradas",
+            description='Haz clic en "Nueva idea" para comenzar.',
+        )
+        self._content_stack.add_named(self._status_page, "empty")
+
+        # List container
+        list_box_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        list_box_outer.set_margin_start(12)
+        list_box_outer.set_margin_end(12)
+        list_box_outer.set_margin_top(12)
+        list_box_outer.set_margin_bottom(12)
+
+        self.list_box = Gtk.ListBox()
+        self.list_box.add_css_class("boxed-list")
+        self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        list_box_outer.append(self.list_box)
+        self._content_stack.add_named(list_box_outer, "list")
+
+        self.append(scroll)
+
+        # ── Count label ───────────────────────────────────────────────────
+        self._count_label = Gtk.Label()
+        self._count_label.add_css_class("dim-label")
+        self._count_label.add_css_class("caption")
+        self._count_label.add_css_class("count-label")
+        self._count_label.set_halign(Gtk.Align.START)
+        self.append(self._count_label)
+
+        # Keyboard shortcut: Ctrl+F → toggle search
+        key_ctrl = Gtk.EventControllerKey()
+        self.add_controller(key_ctrl)
+        key_ctrl.connect("key-pressed", self._on_key_pressed)
+
+    def _on_key_pressed(self, ctrl, keyval, keycode, state):
+        from gi.repository import Gdk
+        if keyval == Gdk.KEY_f and (state & Gdk.ModifierType.CONTROL_MASK):
+            self.btn_search.set_active(not self.btn_search.get_active())
+            return True
+        return False
+
+    # ── Public API ──────────────────────────────────────────────────────────
 
     def refresh(self):
         self._all_ideas = load_all_ideas()
         self._rebuild_month_filter()
-        self._apply_filters()
+        self.refresh_categories()
 
     def refresh_categories(self):
-        current = self.filter_cat.currentData()
-        self.filter_cat.blockSignals(True)
-        self.filter_cat.clear()
-        self.filter_cat.addItem("Todas las categorías", None)
-        for cat in load_categories():
-            self.filter_cat.addItem(cat.nombre, cat.id)
-        # Restore selection if still available
-        for i in range(self.filter_cat.count()):
-            if self.filter_cat.itemData(i) == current:
-                self.filter_cat.setCurrentIndex(i)
+        idx = self.filter_cat.get_selected()
+        old_cat_id = self._cat_ids[idx] if idx < len(self._cat_ids) else None
+
+        cats = load_categories()
+        self._cat_ids = [None] + [c.id for c in cats]
+        new_items = ["Todas"] + [c.nombre for c in cats]
+
+        while self._cat_model.get_n_items() > 0:
+            self._cat_model.remove(0)
+        for item in new_items:
+            self._cat_model.append(item)
+
+        # Restore selection
+        new_idx = 0
+        for i, cid in enumerate(self._cat_ids):
+            if cid == old_cat_id:
+                new_idx = i
                 break
-        self.filter_cat.blockSignals(False)
+        self.filter_cat.set_selected(new_idx)
         self._apply_filters()
 
-    # ── Private ────────────────────────────────────────────────────────────
+    def open_new_form(self):
+        from .idea_form import IdeaFormWindow
+        form = IdeaFormWindow(parent=self.get_root())
+        form.connect("idea-saved", lambda _: self.refresh())
+        form.present()
+
+    # ── Private ─────────────────────────────────────────────────────────────
 
     def _rebuild_month_filter(self):
-        current = self.filter_mes.currentData()
-        self.filter_mes.blockSignals(True)
-        self.filter_mes.clear()
-        self.filter_mes.addItem("Todos los meses", None)
+        idx = self.filter_mes.get_selected()
+        old_mes = self._mes_data[idx] if idx < len(self._mes_data) else None
 
-        months = sorted(set(i.mes_registro() for i in self._all_ideas), reverse=True)
-        for year, month in months:
-            if year == 0:
-                continue
-            label = datetime(year, month, 1).strftime("%B %Y").capitalize()
-            self.filter_mes.addItem(label, (year, month))
+        months = sorted(
+            set(i.mes_registro() for i in self._all_ideas), reverse=True
+        )
+        months = [(y, m) for y, m in months if y != 0]
 
-        for i in range(self.filter_mes.count()):
-            if self.filter_mes.itemData(i) == current:
-                self.filter_mes.setCurrentIndex(i)
+        self._mes_data = [None] + months
+        new_items = ["Todos los meses"]
+        for y, m in months:
+            new_items.append(datetime(y, m, 1).strftime("%B %Y").capitalize())
+
+        while self._mes_model.get_n_items() > 0:
+            self._mes_model.remove(0)
+        for item in new_items:
+            self._mes_model.append(item)
+
+        new_idx = 0
+        for i, mes in enumerate(self._mes_data):
+            if mes == old_mes:
+                new_idx = i
                 break
-        self.filter_mes.blockSignals(False)
-
-        # Also refresh categories combo
-        self.refresh_categories()
+        self.filter_mes.set_selected(new_idx)
 
     def _apply_filters(self):
         ideas = list(self._all_ideas)
-        search = self.search_input.text().strip().lower()
-        cat_id = self.filter_cat.currentData()
-        prioridad = self.filter_prioridad.currentData()
-        estatus = self.filter_estatus.currentData()
-        mes = self.filter_mes.currentData()
-        sort_key = self.sort_combo.currentData()
 
+        # Search
+        search = self.search_entry.get_text().strip().lower()
         if search:
             ideas = [i for i in ideas if search in i.nombre.lower()]
+
+        # Category
+        cat_idx = self.filter_cat.get_selected()
+        cat_id = self._cat_ids[cat_idx] if cat_idx < len(self._cat_ids) else None
         if cat_id:
             ideas = [i for i in ideas if i.categoria_id == cat_id]
-        if prioridad:
+
+        # Priority
+        prio_idx = self.filter_prio.get_selected()
+        if prio_idx > 0:
+            prioridad = PRIORIDADES[prio_idx - 1]
             ideas = [i for i in ideas if i.prioridad == prioridad]
-        if estatus:
+
+        # Status
+        est_idx = self.filter_est.get_selected()
+        if est_idx > 0:
+            estatus = STATUS_LIST[est_idx - 1]
             ideas = [i for i in ideas if i.estatus == estatus]
+
+        # Month
+        mes_idx = self.filter_mes.get_selected()
+        mes = self._mes_data[mes_idx] if mes_idx < len(self._mes_data) else None
         if mes:
             ideas = [i for i in ideas if i.mes_registro() == mes]
 
-        PRIORIDAD_ORDER = {"Alta": 0, "Media": 1, "Baja": 2}
-        if sort_key == "fecha_desc":
+        # Sort
+        PRIO_ORDER = {"Alta": 0, "Media": 1, "Baja": 2}
+        sort_idx = self.sort_combo.get_selected()
+        if sort_idx == 0:
             ideas.sort(key=lambda i: i.fecha_registro, reverse=True)
-        elif sort_key == "fecha_asc":
+        elif sort_idx == 1:
             ideas.sort(key=lambda i: i.fecha_registro)
-        elif sort_key == "prioridad":
-            ideas.sort(key=lambda i: PRIORIDAD_ORDER.get(i.prioridad, 9))
-        elif sort_key == "nombre":
+        elif sort_idx == 2:
+            ideas.sort(key=lambda i: PRIO_ORDER.get(i.prioridad, 9))
+        elif sort_idx == 3:
             ideas.sort(key=lambda i: i.nombre.lower())
 
-        self._populate_table(ideas)
-        count = len(ideas)
-        total = len(self._all_ideas)
-        self.status_label.setText(
-            f"{count} idea{'s' if count != 1 else ''}"
-            + (f" (de {total} total)" if count != total else "")
-        )
+        self._populate_list(ideas)
+        count, total = len(ideas), len(self._all_ideas)
+        suffix = f" (de {total} total)" if count != total else ""
+        self._count_label.set_label(f"  {count} idea{'s' if count != 1 else ''}{suffix}")
 
-    def _populate_table(self, ideas: List[Idea]):
-        self.table.setRowCount(0)
+    def _populate_list(self, ideas: List[Idea]):
+        # Remove all existing rows
+        while True:
+            row = self.list_box.get_first_child()
+            if row is None:
+                break
+            self.list_box.remove(row)
+
+        if not ideas:
+            self._content_stack.set_visible_child_name("empty")
+            return
+
+        self._content_stack.set_visible_child_name("list")
         for idea in ideas:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
+            row = self._make_row(idea)
+            self.list_box.append(row)
 
-            # Nombre
-            item_nombre = QTableWidgetItem(idea.nombre)
-            item_nombre.setData(Qt.ItemDataRole.UserRole, idea.id)
-            self.table.setItem(row, 0, item_nombre)
+    def _make_row(self, idea: Idea) -> Adw.ActionRow:
+        row = Adw.ActionRow()
+        row.set_title(idea.nombre)
+        row.set_subtitle(
+            f"{idea.categoria_nombre}  ·  {idea.fecha_registro_display()}"
+        )
+        row.set_activatable(True)
+        row.connect("activated", lambda _r: self._open_edit_form(idea.id))
 
-            # Categoría
-            self.table.setItem(row, 1, QTableWidgetItem(idea.categoria_nombre))
+        # Prefix: status color dot
+        dot = Gtk.Label(label="●")
+        dot_class = STATUS_DOT.get(idea.estatus, "dot-gray")
+        dot.add_css_class(dot_class)
+        dot.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(dot)
 
-            # Prioridad
-            item_prio = QTableWidgetItem(idea.prioridad)
-            color = PRIORIDAD_COLORS.get(idea.prioridad, "#888")
-            item_prio.setForeground(QBrush(QColor(color)))
-            item_prio.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-            self.table.setItem(row, 2, item_prio)
+        # Suffix: priority badge + status badge + edit + delete
+        prio_badge = Gtk.Label(label=idea.prioridad)
+        prio_badge.add_css_class("status-badge")
+        prio_badge.add_css_class(PRIORIDAD_DOT.get(idea.prioridad, "dot-gray").replace("dot-", "badge-"))
+        prio_badge.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(prio_badge)
 
-            # Estatus
-            status_color = STATUS_COLORS.get(idea.estatus, "#888")
-            item_status = QTableWidgetItem(f"  {idea.estatus}")
-            item_status.setForeground(QBrush(QColor(status_color)))
-            item_status.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-            self.table.setItem(row, 3, item_status)
+        status_badge = Gtk.Label(label=idea.estatus)
+        status_badge.add_css_class("status-badge")
+        status_badge.add_css_class(STATUS_BADGE.get(idea.estatus, "badge-gray"))
+        status_badge.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(status_badge)
 
-            # Fecha Registro
-            self.table.setItem(row, 4, QTableWidgetItem(idea.fecha_registro_display()))
+        btn_edit = Gtk.Button(icon_name="document-edit-symbolic")
+        btn_edit.add_css_class("flat")
+        btn_edit.set_tooltip_text("Editar idea")
+        btn_edit.set_valign(Gtk.Align.CENTER)
+        btn_edit.connect("clicked", lambda _b: self._open_edit_form(idea.id))
+        row.add_suffix(btn_edit)
 
-            # Fecha Inicio
-            self.table.setItem(row, 5, QTableWidgetItem(idea.fecha_inicio_display()))
+        btn_del = Gtk.Button(icon_name="edit-delete-symbolic")
+        btn_del.add_css_class("flat")
+        btn_del.add_css_class("destructive-action")
+        btn_del.set_tooltip_text("Eliminar idea")
+        btn_del.set_valign(Gtk.Align.CENTER)
+        btn_del.connect("clicked", lambda _b: self._delete_idea(idea))
+        row.add_suffix(btn_del)
 
-            # Acciones
-            actions_widget = self._make_actions_widget(idea.id)
-            self.table.setCellWidget(row, 6, actions_widget)
-
-    def _make_actions_widget(self, idea_id: str) -> QWidget:
-        w = QWidget()
-        w.setStyleSheet("background: transparent;")
-        layout = QHBoxLayout(w)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(14)
-
-        btn_edit = QPushButton("✏  Editar")
-        btn_edit.setStyleSheet(BTN_SECONDARY)
-        btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_edit.setFixedSize(88, 32)
-
-        btn_del = QPushButton("🗑  Borrar")
-        btn_del.setStyleSheet(BTN_DANGER)
-        btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_del.setFixedSize(96, 32)
-
-        btn_edit.clicked.connect(lambda: self._open_edit_form(idea_id))
-        btn_del.clicked.connect(lambda: self._confirm_delete(idea_id))
-
-        layout.addWidget(btn_edit)
-        layout.addWidget(btn_del)
-        return w
-
-    def _open_new_form(self):
-        from .idea_form import IdeaFormDialog
-        dlg = IdeaFormDialog(parent=self)
-        if dlg.exec():
-            self.refresh()
+        return row
 
     def _open_edit_form(self, idea_id: str):
         from ..data_manager import load_idea
-        from .idea_form import IdeaFormDialog
+        from .idea_form import IdeaFormWindow
         idea = load_idea(idea_id)
         if idea is None:
-            QMessageBox.warning(self, "Error", "No se encontró la idea.")
+            self._show_error("No se encontró la idea.")
             return
-        dlg = IdeaFormDialog(idea=idea, parent=self)
-        if dlg.exec():
+        form = IdeaFormWindow(idea=idea, parent=self.get_root())
+        form.connect("idea-saved", lambda _: self.refresh())
+        form.present()
+
+    def _delete_idea(self, idea: Idea):
+        """Delete immediately, offer undo via toast."""
+        # Cancel any previous pending delete
+        if self._pending_delete is not None:
+            self._flush_pending_delete()
+
+        self._pending_delete = idea
+        delete_idea(idea.id)
+        self.refresh()
+
+        toast = Adw.Toast(title=f"Idea «{idea.nombre}» eliminada")
+        toast.set_button_label("Deshacer")
+        toast.set_timeout(5)
+        toast.connect("button-clicked", self._undo_delete)
+        toast.connect("dismissed", self._on_toast_dismissed)
+        self._toast_overlay.add_toast(toast)
+
+    def _undo_delete(self, _toast):
+        if self._pending_delete is not None:
+            save_idea(self._pending_delete)
+            self._pending_delete = None
             self.refresh()
 
-    def _confirm_delete(self, idea_id: str):
-        from ..data_manager import load_idea
-        idea = load_idea(idea_id)
-        name = idea.nombre if idea else idea_id
-        reply = QMessageBox.question(
-            self, "Eliminar Idea",
-            f"¿Estás seguro de que deseas eliminar la idea:\n\n\"{name}\"?\n\nEsta acción no se puede deshacer.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            delete_idea(idea_id)
-            self.refresh()
+    def _on_toast_dismissed(self, _toast):
+        self._pending_delete = None
+
+    def _flush_pending_delete(self):
+        """Commit a pending delete (toast timed out) — data already deleted."""
+        self._pending_delete = None
+
+    def _show_error(self, message: str):
+        toast = Adw.Toast(title=message)
+        toast.set_timeout(3)
+        self._toast_overlay.add_toast(toast)
