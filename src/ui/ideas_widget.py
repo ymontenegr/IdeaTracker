@@ -6,6 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Adw, GObject
+import cairo
 
 from ..data_manager import load_all_ideas, load_categories, delete_idea, save_idea
 from ..models import Idea
@@ -34,6 +35,151 @@ PRIORIDAD_DOT = {
     "Media": "dot-orange",
     "Baja":  "dot-green",
 }
+
+
+class StatusChartWidget(Gtk.Box):
+    """Gráfico de barras verticales — total de ideas por estatus."""
+
+    _STATUSES = [
+        ("Por iniciar", "#2196F3"),
+        ("Iniciado",    "#FFC107"),
+        ("En proceso",  "#FF9800"),
+        ("Finalizado",  "#4CAF50"),
+        ("Postergado",  "#9E9E9E"),
+        ("Cancelado",   "#F44336"),
+    ]
+    _LABELS = {
+        "Por iniciar": "P.Iniciar",
+        "Iniciado":    "Iniciado",
+        "En proceso":  "En proc.",
+        "Finalizado":  "Finalizado",
+        "Postergado":  "Postergado",
+        "Cancelado":   "Cancelado",
+    }
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("card")
+        self.set_margin_start(12)
+        self.set_margin_end(12)
+        self.set_margin_top(8)
+        self.set_margin_bottom(0)
+
+        self._ideas: List[Idea] = []
+
+        # ── Encabezado ──────────────────────────────────────────────────
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        header.set_margin_start(14)
+        header.set_margin_end(14)
+        header.set_margin_top(12)
+        header.set_margin_bottom(6)
+
+        self._title_lbl = Gtk.Label(label="Ideas por estatus — Todos los meses")
+        self._title_lbl.add_css_class("heading")
+        self._title_lbl.set_halign(Gtk.Align.START)
+        self._title_lbl.set_hexpand(True)
+        header.append(self._title_lbl)
+        self.append(header)
+
+        # ── Área de dibujo ──────────────────────────────────────────────
+        self._area = Gtk.DrawingArea()
+        self._area.set_content_height(175)
+        self._area.set_margin_start(12)
+        self._area.set_margin_end(12)
+        self._area.set_margin_bottom(12)
+        self._area.set_draw_func(self._draw)
+        self.append(self._area)
+
+    def update(self, ideas: List["Idea"], month_label: str = "Todos los meses") -> None:
+        self._ideas = list(ideas)
+        self._title_lbl.set_label(f"Ideas por estatus  ·  {month_label}")
+        self._area.queue_draw()
+
+    def _draw(self, area, cr, width, height):
+        counts = {s: 0 for s, _ in self._STATUSES}
+        for idea in self._ideas:
+            if idea.estatus in counts:
+                counts[idea.estatus] += 1
+
+        total = sum(counts.values())
+        max_c = max(counts.values()) if total > 0 else 1
+
+        n = len(self._STATUSES)
+        pad_l, pad_r = 12, 12
+        pad_top = 28    # espacio para etiquetas de conteo encima de las barras
+        pad_bot = 36    # espacio para nombres de estatus debajo
+
+        cw = width - pad_l - pad_r
+        ch = height - pad_top - pad_bot
+        slot_w = cw / n
+        gap = max(slot_w * 0.22, 6)
+        bar_w = slot_w - gap
+        baseline_y = pad_top + ch
+
+        # ── Línea base ──────────────────────────────────────────────────
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.2)
+        cr.set_line_width(1)
+        cr.move_to(pad_l, baseline_y)
+        cr.line_to(pad_l + cw, baseline_y)
+        cr.stroke()
+
+        # ── Barras + etiquetas ──────────────────────────────────────────
+        for i, (status, hex_c) in enumerate(self._STATUSES):
+            count = counts[status]
+            bar_h = (count / max_c) * ch
+
+            x = pad_l + i * slot_w + gap / 2
+            bar_y = baseline_y - bar_h
+
+            r = int(hex_c[1:3], 16) / 255
+            g = int(hex_c[3:5], 16) / 255
+            b = int(hex_c[5:7], 16) / 255
+
+            # Barra principal
+            cr.set_source_rgba(r, g, b, 0.85)
+            if bar_h >= 2:
+                cr.rectangle(x, bar_y, bar_w, bar_h)
+                cr.fill()
+                # Borde superior más oscuro
+                cr.set_source_rgba(r * 0.75, g * 0.75, b * 0.75, 1.0)
+                cr.rectangle(x, bar_y, bar_w, 2)
+                cr.fill()
+            else:
+                # Indicador mínimo para conteo cero
+                cr.rectangle(x, baseline_y - 3, bar_w, 3)
+                cr.fill()
+
+            # Etiqueta de conteo encima de la barra
+            count_str = str(count)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(12)
+            te = cr.text_extents(count_str)
+            lx = x + bar_w / 2 - te[2] / 2
+            ly = bar_y - 6 if bar_h >= 2 else baseline_y - 8
+            ly = max(ly, pad_top - 2)
+            cr.set_source_rgba(0.15, 0.15, 0.15, 0.9)
+            cr.move_to(lx, ly)
+            cr.show_text(count_str)
+
+            # Etiqueta de estatus debajo de la línea base
+            label = self._LABELS.get(status, status)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(9)
+            te2 = cr.text_extents(label)
+            lx2 = x + bar_w / 2 - te2[2] / 2
+            cr.set_source_rgba(0.35, 0.35, 0.35, 0.85)
+            cr.move_to(lx2, baseline_y + 16)
+            cr.show_text(label)
+
+        # ── Mensaje cuando no hay datos ──────────────────────────────────
+        if total == 0:
+            cr.set_source_rgba(0.5, 0.5, 0.5, 0.55)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(13)
+            msg = "Sin ideas en este período"
+            te = cr.text_extents(msg)
+            cr.move_to(width / 2 - te[2] / 2, height / 2 - pad_bot / 2 + 5)
+            cr.show_text(msg)
 
 
 class IdeasWidget(Gtk.Box):
@@ -155,6 +301,10 @@ class IdeasWidget(Gtk.Box):
         filter_bar.append(self.sort_combo)
 
         self.append(filter_bar)
+
+        # ── Dashboard chart ───────────────────────────────────────────────
+        self._chart = StatusChartWidget()
+        self.append(self._chart)
 
         # ── Scrollable list ───────────────────────────────────────────────
         scroll = Gtk.ScrolledWindow()
@@ -317,6 +467,16 @@ class IdeasWidget(Gtk.Box):
             ideas.sort(key=lambda i: i.nombre.lower())
 
         self._populate_list(ideas)
+
+        # ── Actualizar gráfico dashboard ──────────────────────────────────
+        mes_idx = self.filter_mes.get_selected()
+        if mes_idx > 0 and mes_idx < len(self._mes_data) and self._mes_data[mes_idx]:
+            y_val, m_val = self._mes_data[mes_idx]
+            month_label = datetime(y_val, m_val, 1).strftime("%B %Y").capitalize()
+        else:
+            month_label = "Todos los meses"
+        self._chart.update(ideas, month_label)
+
         count, total = len(ideas), len(self._all_ideas)
         suffix = f" (de {total} total)" if count != total else ""
         self._count_label.set_label(f"  {count} idea{'s' if count != 1 else ''}{suffix}")

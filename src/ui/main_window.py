@@ -15,6 +15,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_icon_name("IdeaTracker")   # taskbar + title bar icon
         self._build_ui()
         self._setup_actions()
+        self.maximize()
 
     def _build_ui(self):
         # ToastOverlay wraps all content so toasts work app-wide
@@ -166,7 +167,7 @@ class MainWindow(Adw.ApplicationWindow):
             application_name="IdeaTracker",
             application_icon="IdeaTracker",
             developer_name="IdeaTracker",
-            version="1.3.0",
+            version="1.4.0",
             comments="Gestión de ideas y planes de negocio.",
             license_type=Gtk.License.GPL_3_0,
             copyright="© 2024 IdeaTracker",
