@@ -1,8 +1,26 @@
-# IdeaTracker v1.3.0
+# IdeaTracker v1.4.0
 
 Aplicación de escritorio para **registrar, gestionar, priorizar y hacer seguimiento de ideas, planes de negocio y tareas**. Funciona completamente offline, sin bases de datos externas ni conexión a internet.
 
 Desarrollada para **Ubuntu 24.04 LTS** con Python, GTK4 y Libadwaita, siguiendo las guías de diseño GNOME HIG.
+
+---
+
+## Novedades en v1.4.0
+
+### Dashboard con gráfico de estatus
+- La vista **Ideas** incorpora un gráfico de barras verticales en la parte superior que muestra la cantidad de ideas por cada estatus (Por iniciar, Iniciado, En proceso, Finalizado, Postergado, Cancelado).
+- El gráfico se dibuja con **Cairo / GTK4 DrawingArea** — sin dependencias externas.
+- El filtro **Mes** controla tanto el gráfico como el detalle de ideas: al cambiar el mes, ambos se actualizan simultáneamente.
+- El filtro **Mes** selecciona automáticamente el mes actual al abrir la aplicación.
+
+### Pantalla Reportes — layout dos paneles
+- La pantalla de Reportes se divide en **panel izquierdo** (filtros) y **panel derecho** (contenido del reporte).
+- Al hacer clic en "Ver reporte" el resultado se muestra **inline** en el panel derecho — sin abrir una ventana secundaria.
+- El reporte por idea incorpora un **filtro de mes** previo que reduce la lista de ideas al período seleccionado, facilitando la búsqueda cuando hay muchas ideas registradas.
+
+### Ventana maximizada al abrir
+- La aplicación abre siempre **maximizada** para aprovechar el espacio de pantalla desde el primer uso.
 
 ---
 
@@ -118,9 +136,9 @@ Categorías predeterminadas:
 `Planes de Negocio` · `Compras` · `Finanzas` · `Viajes` · `Tecnología` · `Personal` · `Operaciones` · `Comercial` · `Educación` · `Otros`
 
 ### Reportes
-Tres tipos de reportes con **visor nativo** y generación de **PDF independiente**:
+Tres tipos de reportes con **visor inline** (panel derecho) y generación de **PDF independiente**:
 
-- **Reporte Detallado por Idea**: ficha completa con todos los campos, historial de notas y badge de estatus.
+- **Reporte Detallado por Idea**: filtro de mes + selector de idea → ficha completa con todos los campos, historial de notas y badge de estatus.
 - **Reporte Mensual**: listado de ideas del mes con expandidores por idea y resumen de conteo por estatus.
 - **Reporte Detallado de Tarea**: ficha completa con historial de cambios de estatus y notas.
 
@@ -248,6 +266,13 @@ IdeaTracker/
 ---
 
 ## Historial de versiones
+
+### v1.4.0 (2026-04-12)
+- Dashboard con gráfico de barras (Cairo) en vista Ideas: total por estatus filtrable por mes
+- Filtro "Mes" en Ideas selecciona el mes actual por defecto al abrir
+- Pantalla Reportes rediseñada con layout dos paneles (filtros | contenido inline)
+- Reporte por idea: nuevo filtro de mes previo para reducir la lista de ideas
+- Ventana maximizada al abrir la aplicación
 
 ### v1.3.0 (2026-04-05)
 - Migración completa de la interfaz de PyQt6 → GTK4 + Libadwaita

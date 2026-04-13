@@ -399,6 +399,7 @@ class IdeasWidget(Gtk.Box):
     def _rebuild_month_filter(self):
         idx = self.filter_mes.get_selected()
         old_mes = self._mes_data[idx] if idx < len(self._mes_data) else None
+        is_first_load = len(self._mes_data) == 1 and self._mes_data[0] is None
 
         months = sorted(
             set(i.mes_registro() for i in self._all_ideas), reverse=True
@@ -415,11 +416,18 @@ class IdeasWidget(Gtk.Box):
         for item in new_items:
             self._mes_model.append(item)
 
-        new_idx = 0
-        for i, mes in enumerate(self._mes_data):
-            if mes == old_mes:
-                new_idx = i
-                break
+        if is_first_load:
+            # Default to the current month on first load
+            now = datetime.now()
+            current = (now.year, now.month)
+            new_idx = next(
+                (i for i, mes in enumerate(self._mes_data) if mes == current), 0
+            )
+        else:
+            # Restore previous selection
+            new_idx = next(
+                (i for i, mes in enumerate(self._mes_data) if mes == old_mes), 0
+            )
         self.filter_mes.set_selected(new_idx)
 
     def _apply_filters(self):
